@@ -1,17 +1,30 @@
 /*
  * Wilnu Taxi — boekingsformulier widget, basisstijl.
  *
- * Bewust neutraal en terughoudend: lettertype wordt NIET overschreven, zodat
- * de widget automatisch het lettertype van de Elementor-pagina overneemt
- * (startdocument: "zoveel mogelijk aansluiten bij wat al in Elementor is
- * ingericht"). Kleuren staan als CSS-variabelen, met een neutrale fallback
- * — overschrijf deze op de pagina (of hierin) met de echte huisstijlkleuren
- * zodra die bekend zijn:
+ * Bewust neutraal en terughoudend: het lettertype (font-family) wordt NIET
+ * overschreven, zodat de widget automatisch het lettertype van de
+ * Elementor-pagina overneemt (startdocument: "zoveel mogelijk aansluiten
+ * bij wat al in Elementor is ingericht"). Kleuren staan als CSS-variabelen,
+ * met een neutrale fallback — overschrijf deze op de pagina (of hierin) met
+ * de echte huisstijlkleuren zodra die bekend zijn:
  *
  *   .wnt-widget {
  *     --wnt-accent: #jouw-merkkleur;
  *     --wnt-accent-contrast: #ffffff;
  *   }
+ *
+ * 29 augustus 2026 — lettergrootte nu wel verankerd (bugfix, "niet
+ * responsive"-melding op de testpagina): de font-FAMILY bleef bewust
+ * ongemoeid (zie hierboven), maar koppen als "Uw rit" (.wnt-step h2) en de
+ * voertuignaam (.wnt-vehicle-card h3) hadden geen eigen font-size en erfden
+ * daardoor de kop-stijl van de omringende pagina/thema — op een gewone
+ * WordPress-pagina (zonder Elementor-opmaak) kan dat een kop van 32px+
+ * opleveren voor wat een compact stap-kopje hoort te zijn, vooral storend
+ * op een smal (mobiel) scherm. .wnt-widget krijgt nu een eigen basis
+ * font-size (16px) waar alle em-waarden in deze stylesheet op verankerd
+ * zijn, en de koppen krijgen een eigen, bescheiden grootte — zodat de
+ * widget er consistent uitziet, ongeacht het thema of de pagina waarop hij
+ * wordt geplaatst.
  */
 
 .wnt-widget {
@@ -25,6 +38,11 @@
   --wnt-warning-border: #f0b429;
   --wnt-warning-text: #7a4a00;
   --wnt-radius: 8px;
+
+  /* Anker voor alle "em"-waarden hieronder (29 augustus 2026), zodat de
+     widget niet per ongeluk een (veel) grotere of kleinere basisgrootte
+     erft van de pagina eromheen. */
+  font-size: 16px;
 
   max-width: 640px;
   margin: 0 auto;
@@ -57,6 +75,12 @@
 
 .wnt-step h2 {
   margin-top: 0;
+  /* 29 augustus 2026: eigen, bescheiden kopgrootte in plaats van de
+     kopstijl van de pagina te erven (zie toelichting bovenaan dit
+     bestand). */
+  font-size: 1.4em;
+  font-weight: 600;
+  line-height: 1.25;
 }
 
 .wnt-field {
@@ -274,6 +298,10 @@
 .wnt-vehicle-card h3 {
   margin: 0 0 0.2rem;
   text-align: center;
+  /* 29 augustus 2026: zelfde reden als bij .wnt-step h2 hierboven — anders
+     wordt de voertuignaam op een kaart net zo groot als een paginakop. */
+  font-size: 1.1em;
+  font-weight: 600;
   /* Vaste minimumhoogte (ruimte voor twee regels) zodat een langere of
      kortere voertuignaam de prijs niet op een andere hoogte laat beginnen
      dan bij de kaarten ernaast (Hans, 20 augustus 2026: "zou je ook de
@@ -345,4 +373,19 @@
 .wnt-vehicle-warning {
   font-size: 0.85em;
   color: var(--wnt-text-muted);
+}
+
+/* 29 augustus 2026: kleine correctie voor smalle (mobiele) schermen — de
+   stap-koppen mogen daar iets bescheidener, en de widget hoeft dan niet
+   nog een keer extra zijmarge te reserveren bovenop wat de pagina zelf al
+   doet. Alleen kleine tweaks; de grid/flex-layouts hierboven (auto-fit /
+   flex-wrap) handelen het echte herschikken al zelf af. */
+@media (max-width: 480px) {
+  .wnt-step h2 {
+    font-size: 1.2em;
+  }
+
+  .wnt-vehicle-card h3 {
+    font-size: 1em;
+  }
 }

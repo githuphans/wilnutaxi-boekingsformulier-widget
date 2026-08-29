@@ -293,6 +293,15 @@
      dan de andere. */
   display: flex;
   flex-direction: column;
+  /* 29 augustus 2026 (Hans, mobiel getest): zonder "min-width: 0" mag een
+     grid-kolom van CSS-huis uit nooit smaller worden dan de langste
+     ononderbroken tekst erin ("min-width: auto" is de standaard voor
+     grid-items). Namen als "Sedan/stationwagon" en "SUV/Stationwagon"
+     hebben geen spatie, alleen een "/" - sommige browsers (met name Safari
+     op iPhone) breken daar niet op af, waardoor de kaart breder werd
+     geduwd dan de grid-kolom toestond en de tekst links van het scherm af
+     liep. Deze regel laat de kaart wél normaal meekrimpen. */
+  min-width: 0;
 }
 
 .wnt-vehicle-card h3 {
@@ -302,6 +311,11 @@
      wordt de voertuignaam op een kaart net zo groot als een paginakop. */
   font-size: 1.1em;
   font-weight: 600;
+  /* 29 augustus 2026: laat een lange, ononderbroken voertuignaam
+     ("SUV/Stationwagon") desnoods midden in het woord afbreken in plaats
+     van de kaart te verbreden of van het scherm af te laten lopen (zie
+     toelichting bij "min-width: 0" hierboven bij .wnt-vehicle-card). */
+  overflow-wrap: anywhere;
   /* Vaste minimumhoogte (ruimte voor twee regels) zodat een langere of
      kortere voertuignaam de prijs niet op een andere hoogte laat beginnen
      dan bij de kaarten ernaast (Hans, 20 augustus 2026: "zou je ook de

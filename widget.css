@@ -1,0 +1,348 @@
+/*
+ * Wilnu Taxi — boekingsformulier widget, basisstijl.
+ *
+ * Bewust neutraal en terughoudend: lettertype wordt NIET overschreven, zodat
+ * de widget automatisch het lettertype van de Elementor-pagina overneemt
+ * (startdocument: "zoveel mogelijk aansluiten bij wat al in Elementor is
+ * ingericht"). Kleuren staan als CSS-variabelen, met een neutrale fallback
+ * — overschrijf deze op de pagina (of hierin) met de echte huisstijlkleuren
+ * zodra die bekend zijn:
+ *
+ *   .wnt-widget {
+ *     --wnt-accent: #jouw-merkkleur;
+ *     --wnt-accent-contrast: #ffffff;
+ *   }
+ */
+
+.wnt-widget {
+  --wnt-accent: #0f766e;
+  --wnt-accent-contrast: #ffffff;
+  --wnt-border: #d9d9d9;
+  --wnt-bg-subtle: #f7f7f7;
+  --wnt-text-muted: #666666;
+  --wnt-error: #b3261e;
+  --wnt-warning-bg: #fff4e0;
+  --wnt-warning-border: #f0b429;
+  --wnt-warning-text: #7a4a00;
+  --wnt-radius: 8px;
+
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.wnt-widget * {
+  box-sizing: border-box;
+}
+
+.wnt-progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  font-size: 0.85em;
+  color: var(--wnt-text-muted);
+}
+
+.wnt-progress-step {
+  padding: 0.25em 0.6em;
+  border-radius: 999px;
+  background: var(--wnt-bg-subtle);
+}
+
+.wnt-progress-step-active {
+  background: var(--wnt-accent);
+  color: var(--wnt-accent-contrast);
+  font-weight: 600;
+}
+
+.wnt-step h2 {
+  margin-top: 0;
+}
+
+.wnt-field {
+  margin-bottom: 1.1rem;
+  position: relative;
+}
+
+.wnt-field label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+
+.wnt-field input[type="text"],
+.wnt-field input[type="email"],
+.wnt-field input[type="tel"],
+.wnt-field input[type="datetime-local"],
+.wnt-field select,
+.wnt-field textarea {
+  width: 100%;
+  padding: 0.6em 0.7em;
+  border: 1px solid var(--wnt-border);
+  border-radius: var(--wnt-radius);
+  font-size: 1em;
+  font-family: inherit;
+}
+
+.wnt-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.85em;
+  color: var(--wnt-text-muted);
+}
+
+.wnt-chosen-moment {
+  font-size: 1.15em;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.wnt-recognized {
+  margin: 0.35rem 0 0;
+  font-size: 0.85em;
+  color: var(--wnt-accent);
+}
+
+.wnt-error {
+  color: var(--wnt-error);
+  font-size: 0.9em;
+}
+
+/* Werkgebied-waarschuwing (zie renderRideStep in widget.js) — bewust een
+   opvallende banner (in tegenstelling tot .wnt-hint/.wnt-recognized), maar
+   geen "error"-rood: dit is een advies op basis van een gok, geen harde
+   weigering (die gebeurt pas op de server bij het opvragen van de prijs). */
+.wnt-warning {
+  margin: 0.5rem 0 0;
+  padding: 0.7em 0.9em;
+  background: var(--wnt-warning-bg);
+  border: 1px solid var(--wnt-warning-border);
+  border-radius: var(--wnt-radius);
+  color: var(--wnt-warning-text);
+  font-size: 0.9em;
+}
+
+.wnt-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.wnt-row > * {
+  flex: 1 1 200px;
+}
+
+.wnt-stepper-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.wnt-stepper-button {
+  width: 2.2em;
+  height: 2.2em;
+  border-radius: 50%;
+  border: 1px solid var(--wnt-border);
+  background: #fff;
+  font-size: 1.1em;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.wnt-stepper-button:hover {
+  background: var(--wnt-bg-subtle);
+}
+
+.wnt-stepper-value {
+  min-width: 1.5em;
+  text-align: center;
+  font-weight: 600;
+}
+
+.wnt-radio-label {
+  display: block;
+  font-weight: normal;
+  margin-bottom: 0.4rem;
+  cursor: pointer;
+}
+
+/*
+ * Bewust GEEN "position: absolute" (zwevend over de rest van de pagina).
+ * De twee adresvelden staan vlak boven elkaar (kleine marge) — een
+ * zwevende lijst zou dan al bij een paar suggesties over het eronder
+ * liggende bestemmingsveld heen vallen, en klikken die voor dát veld
+ * bedoeld zijn zouden dan per ongeluk op een suggestie van het
+ * bovenste veld terechtkomen. Door de lijst gewoon in de normale
+ * paginaflow te laten meelopen (die het bestemmingsveld naar beneden
+ * duwt zolang de lijst open staat), kan dat niet meer gebeuren — en dit
+ * is ook precies wat Hans beschreef als de vertrouwde werkwijze:
+ * "voorstellen in een lijstje onder de invoer".
+ */
+.wnt-suggestions {
+  background: #fff;
+  border: 1px solid var(--wnt-border);
+  border-radius: var(--wnt-radius);
+  margin-top: 0.25rem;
+  max-height: 220px;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.wnt-suggestion {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.6em 0.7em;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 0.95em;
+  font-family: inherit;
+}
+
+.wnt-suggestion:hover {
+  background: var(--wnt-bg-subtle);
+}
+
+.wnt-suggestion-badge {
+  display: inline-block;
+  font-size: 0.75em;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--wnt-accent);
+  margin-right: 0.4em;
+}
+
+.wnt-suggestion-badge-address {
+  color: var(--wnt-text-muted);
+}
+
+.wnt-suggestions-hint {
+  padding: 0.6em 0.7em;
+  margin: 0;
+  border-top: 1px solid var(--wnt-border);
+}
+
+.wnt-button {
+  padding: 0.7em 1.4em;
+  border-radius: var(--wnt-radius);
+  border: 1px solid transparent;
+  font-size: 1em;
+  font-family: inherit;
+  cursor: pointer;
+  margin-top: 0.5rem;
+}
+
+.wnt-button-primary {
+  background: var(--wnt-accent);
+  color: var(--wnt-accent-contrast);
+}
+
+.wnt-button-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.wnt-button-secondary {
+  background: #fff;
+  border-color: var(--wnt-border);
+  color: inherit;
+  margin-right: 0.5rem;
+}
+
+.wnt-vehicle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.wnt-vehicle-card {
+  border: 1px solid var(--wnt-border);
+  border-radius: var(--wnt-radius);
+  padding: 1rem;
+  /* 19 augustus 2026 (Hans' derde testronde, punt 3): de kaarten in de grid
+     krijgen door "align-items: stretch" (het grid-standaardgedrag hierboven)
+     al gelijke hoogte per rij; door de kaart zelf een kolom-flexbox te maken
+     en de knop hieronder met "margin-top: auto" naar de onderkant te
+     duwen, staan de "Kies dit voertuig"-knoppen altijd horizontaal
+     uitgelijnd, ook als de ene kaart een langere waarschuwingstekst heeft
+     dan de andere. */
+  display: flex;
+  flex-direction: column;
+}
+
+.wnt-vehicle-card h3 {
+  margin: 0 0 0.2rem;
+  text-align: center;
+  /* Vaste minimumhoogte (ruimte voor twee regels) zodat een langere of
+     kortere voertuignaam de prijs niet op een andere hoogte laat beginnen
+     dan bij de kaarten ernaast (Hans, 20 augustus 2026: "zou je ook de
+     prijzen horizontaal kunnen uitlijnen en centreren"). */
+  min-height: 2.4em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wnt-vehicle-image {
+  width: 100%;
+  height: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.5rem;
+  border-radius: calc(var(--wnt-radius) - 2px);
+  background: var(--wnt-bg-muted, #f4f4f4);
+  object-fit: contain;
+}
+
+.wnt-vehicle-icon {
+  color: var(--wnt-text-muted);
+}
+
+.wnt-vehicle-card > .wnt-button {
+  margin-top: auto;
+}
+
+.wnt-vehicle-model {
+  color: var(--wnt-text-muted);
+  font-size: 0.85em;
+  margin: 0 0 0.5rem;
+  text-align: center;
+  /* Zelfde reden als bij h3 hierboven, maar dan voor de modelnaam: "Toyota
+     Corolla Touring Sports" is een stuk langer dan bijvoorbeeld "BYD Atto 3"
+     en breekt op kaartbreedte af naar 2 regels, terwijl de kortere
+     modelnamen op 1 regel blijven staan. Zonder een vaste hoogte hier bleef
+     de prijs daaronder daardoor per kaart op een andere hoogte beginnen, óók
+     al was de titel erboven al wél uitgelijnd (Hans, 20 augustus 2026: "de
+     uitlijning van de prijzen klopt verticaal nog niet").
+     line-height expliciet gezet zodat "2 regels" voorspelbaar 2 × 1.3em is,
+     onafhankelijk van de standaard regelhoogte van de browser. */
+  line-height: 1.3;
+  min-height: 2.6em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wnt-vehicle-price {
+  font-size: 1.4em;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+  text-align: center;
+}
+
+.wnt-vehicle-unavailable {
+  opacity: 0.5;
+}
+
+.wnt-vehicle-selected {
+  border-color: var(--wnt-accent);
+  border-width: 2px;
+}
+
+.wnt-vehicle-reason,
+.wnt-vehicle-warning {
+  font-size: 0.85em;
+  color: var(--wnt-text-muted);
+}

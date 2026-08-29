@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <title>Wilnu Taxi — boekingsformulier widget (demo)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="widget.css" />
+  <style>
+    /* Alleen voor deze demopagina, geen onderdeel van de widget zelf. */
+    body {
+      font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      max-width: 720px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      color: #222;
+    }
+    .demo-note {
+      background: #fff7e6;
+      border: 1px solid #f0c36d;
+      border-radius: 8px;
+      padding: 0.8rem 1rem;
+      font-size: 0.9em;
+      margin-bottom: 2rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Wilnu Taxi — boekingsformulier (demo)</h1>
+
+  <div class="demo-note">
+    <strong>Let op — dit is een demopagina, geen echte website.</strong><br />
+    Deze pagina laat de widget zien zoals die in de code werkt, los van hoe hij er straks op wilnutaxi.nl/Elementor
+    uit komt te zien (zie widget/README.md). Zorg dat de backend lokaal draait
+    (<code>npm run dev</code> in de backend-map) voordat u hier iets invult — deze pagina praat met
+    <code>http://localhost:3000</code>.
+  </div>
+
+  <div data-wnt-widget data-api-base="https://wilnutaxi-boekingsform-backend-5imnk.ondigitalocean.app"></div>
+
+  <script src="widget.js" defer></script>
+</body>
+</html>

@@ -940,6 +940,28 @@
         );
       }
 
+      // 2 september 2026 (Hans: "volgens mij werkt het berekenen van de
+      // afwijkende bagage nog niet goed" -- bleek bij uitzoeken geen
+      // rekenfout: checkVehicleFit telt een bagagetype/bijzonder item bewust
+      // NIET mee zolang de inhoudsmaat ervan nog niet is ingevuld via
+      // /admin (zie baggageCheck.js), zodat er nooit een verzonnen 0 L
+      // gebruikt wordt -- de server stuurt daar per voertuig al een
+      // duidelijke waarschuwing bij (vehicle.baggage.warnings), maar die
+      // werd tot nu toe nergens getoond, waardoor het leek alsof de bagage
+      // gewoon "paste" zonder duidelijke reden. Deze waarschuwingen zijn
+      // voor élk voertuig identiek (dezelfde opgegeven bagage), dus hier
+      // gededupliceerd één keer boven de voertuigkaarten getoond, in
+      // plaats van drie keer identiek onder elke kaart apart.
+      if (state.priceResult && state.priceResult.vehicles) {
+        const baggageWarnings = [];
+        state.priceResult.vehicles.forEach((vehicle) => {
+          (vehicle.baggage?.warnings || []).forEach((w) => {
+            if (!baggageWarnings.includes(w)) baggageWarnings.push(w);
+          });
+        });
+        baggageWarnings.forEach((w) => container.appendChild(el("p", { class: "wnt-hint", text: w })));
+      }
+
       const grid = el("div", { class: "wnt-vehicle-grid" });
       (state.priceResult ? state.priceResult.vehicles : []).forEach((vehicle) => {
         const isSelected = state.selectedVehicleId === vehicle.vehicleId;

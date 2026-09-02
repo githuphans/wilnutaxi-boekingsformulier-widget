@@ -922,7 +922,24 @@
           class: "wnt-button wnt-button-primary",
           text: state.submitting ? "Bezig…" : "Bekijk prijzen",
           disabled: state.submitting ? "" : undefined,
-          onclick: fetchPrice,
+          onclick: () => {
+            // Bug (Hans, 2 september 2026): de vraag "Bij aankomst op de
+            // luchthaven" werd wel getoond zolang er nog geen grote
+            // ruimbagage was opgegeven (zie shouldAskAirportBaggageQuestion
+            // hierboven -- bewust ook zichtbaar bij alleen handbagage,
+            // want dat is precies het twijfelgeval), maar was niet
+            // verplicht: de klant kon zonder antwoord gewoon doorklikken
+            // naar de prijzen. Net als bij de adresvelden op stap 1
+            // (isFieldConfirmed hierboven) blokkeren we nu het doorgaan
+            // zolang deze vraag zichtbaar is én nog onbeantwoord.
+            if (shouldAskAirportBaggageQuestion() && !state.airportBaggageAnswer) {
+              alert(
+                "Geef aan of u bagage van de band moet ophalen of alleen handbagage bij u heeft, zodat we uw wachttijd na aankomst goed kunnen inschatten."
+              );
+              return;
+            }
+            fetchPrice();
+          },
         })
       );
       container.appendChild(buttonRow);

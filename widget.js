@@ -616,6 +616,17 @@
       return wrapper;
     }
 
+    // Zet bagage-gerelateerde state terug naar de neutrale standaardwaarde
+    // ("geen bagage") -- gebruikt zodra de klant op stap 1 alsnog "Nee"
+    // kiest bij "Heeft u bagage die mee moet?", zodat eerder op stap 2
+    // ingevulde aantallen niet blijven meetellen in de prijs-/bagagecheck
+    // (zie de toelichting bij de onchange-handler hieronder).
+    function resetBaggageSelections() {
+      state.baggageCounts = {};
+      state.specialBaggageId = "geen";
+      state.airportBaggageAnswer = null;
+    }
+
     function renderRideStep() {
       const container = el("div", { class: "wnt-step" });
       container.appendChild(el("h2", { text: "Uw rit" }));
@@ -708,6 +719,20 @@
               checked: state.hasBaggage === opt.value ? "" : undefined,
               onchange: () => {
                 state.hasBaggage = opt.value;
+                // Bug (Hans, 2 september 2026): vult iemand eerst bagage
+                // in bij stap 2, gaat daarna terug naar stap 1 en kiest hier
+                // alsnog "Nee", dan bleven baggageCounts/specialBaggageId
+                // van de eerdere invoer gewoon staan -- de bagage-stap
+                // wordt dan wel overgeslagen, maar de oude aantallen werden
+                // nog steeds meegestuurd naar de prijs-/bagagecheck, met
+                // als gevolg dat er onterecht voertuigen als "niet
+                // beschikbaar" werden getoond terwijl de klant net had
+                // aangegeven geen bagage mee te nemen. "Nee" moet dus altijd
+                // ook echt terug naar de neutrale standaardwaarde, niet
+                // alleen de stap overslaan.
+                if (state.hasBaggage === false) {
+                  resetBaggageSelections();
+                }
                 // Wél opnieuw renderen (in tegenstelling tot bij het typen
                 // in een tekstveld): dit is een discrete klik, geen
                 // doorlopende invoer, en de knoptekst hieronder ("Verder
@@ -750,12 +775,18 @@
               return;
             }
             if (state.hasBaggage === false) {
-              // Geen bagage-stap nodig: baggageCounts/specialBaggageId staan
-              // al op hun neutrale standaardwaarde. Bij een luchthavenrit is
-              // "geen bagage" ook meteen het antwoord op de
-              // bagageband-vraag (zie renderBaggageStep) -- die stap wordt
-              // hier overgeslagen, dus die vullen we hier vast zelf in, in
-              // plaats van de chauffeur zonder enig antwoord te laten.
+              // Geen bagage-stap nodig. Extra zekerheid (naast de reset in
+              // de onchange-handler hierboven, zie resetBaggageSelections):
+              // ook hier nog eens expliciet terugzetten voor het geval
+              // baggageCounts/specialBaggageId via een ander pad toch nog
+              // een oude waarde zouden hebben -- zo kan er nooit meer
+              // eerder ingevulde bagage worden meegeteld terwijl de klant
+              // hier "Nee" heeft gekozen. Bij een luchthavenrit is "geen
+              // bagage" ook meteen het antwoord op de bagageband-vraag (zie
+              // renderBaggageStep) -- die stap wordt hier overgeslagen, dus
+              // die vullen we hier vast zelf in, in plaats van de chauffeur
+              // zonder enig antwoord te laten.
+              resetBaggageSelections();
               if (isAirportPickup() && !state.airportBaggageAnswer) {
                 state.airportBaggageAnswer = "handbagage";
               }

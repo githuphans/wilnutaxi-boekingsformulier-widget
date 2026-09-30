@@ -1023,13 +1023,20 @@
           card.appendChild(el("p", { class: "wnt-vehicle-price", text: euro(vehicle.price.totalEuro) }));
         }
         if (!vehicle.available) {
-          card.appendChild(
-            el("p", { class: "wnt-vehicle-reason" }, [
-              !vehicle.baggage.fits
-                ? vehicle.baggage.reason || "Bagage past niet in dit voertuig."
-                : vehicle.priceError || "Prijs kon niet berekend worden.",
-            ])
-          );
+          // 30 september 2026: de capaciteitscheck (vehicle.capacity.full,
+          // zie startdocument "Capaciteitscheck gebouwd") kan een voertuig
+          // ook onbeschikbaar maken terwijl de bagage prima past en de prijs
+          // gewoon berekend kon worden -- zonder deze tak viel dat geval
+          // ten onrechte terug op de generieke priceError-melding hieronder.
+          let reasonText;
+          if (!vehicle.baggage.fits) {
+            reasonText = vehicle.baggage.reason || "Bagage past niet in dit voertuig.";
+          } else if (vehicle.capacity && vehicle.capacity.full) {
+            reasonText = vehicle.capacity.reason || "Dit voertuigtype is voor het gekozen tijdstip helaas al volgeboekt.";
+          } else {
+            reasonText = vehicle.priceError || "Prijs kon niet berekend worden.";
+          }
+          card.appendChild(el("p", { class: "wnt-vehicle-reason" }, [reasonText]));
         }
         if (vehicle.price && vehicle.price.warnings && vehicle.price.warnings.length) {
           vehicle.price.warnings.forEach((w) => card.appendChild(el("p", { class: "wnt-vehicle-warning", text: w })));

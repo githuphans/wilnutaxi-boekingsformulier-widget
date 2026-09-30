@@ -283,6 +283,22 @@
       return state.passengerCount + state.childCount;
     }
 
+    // 30 september 2026 (Hans): de taal bij een boeking kwam bij taxiID
+    // altijd als "en" binnen, ook op de Nederlandstalige pagina. Oorzaak:
+    // deze widget stuurde helemaal geen taal mee, waardoor de backend zijn
+    // vaste standaardwaarde gebruikte -- en die stond op "nl-NL", een vorm
+    // die taxiID kennelijk niet herkent (hun documentatie-voorbeeld
+    // gebruikt een korte code als "EN") en zelf liet terugvallen op "en".
+    // document.documentElement.lang volgt de daadwerkelijk getoonde
+    // paginataal (WordPress/Weglot zet dit attribuut correct) -- dus een
+    // Nederlandstalige bezoeker geeft "NL", een bezoeker op de Engelse
+    // (Weglot-)versie geeft "EN".
+    function detectPageLanguageCode() {
+      const htmlLang = (document.documentElement && document.documentElement.lang) || "";
+      const match = /^[a-zA-Z]{2}/.exec(htmlLang.trim());
+      return match ? match[0].toUpperCase() : "NL";
+    }
+
     function determineRideMeta() {
       // Richting volgt uit welk veld een herkende POI bevat — geen aparte
       // vraag (zie startdocument, "Gekozen ontwerp: POI-herkenning...").
@@ -456,7 +472,7 @@
         destinationZone: resolveZone(state.destination) || undefined,
         originAddress: state.origin.text,
         destinationAddress: state.destination.text,
-        passenger: state.passenger,
+        passenger: { ...state.passenger, language: detectPageLanguageCode() },
         note: noteParts.join(" ") || undefined,
       };
 

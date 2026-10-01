@@ -1044,11 +1044,18 @@
           // ook onbeschikbaar maken terwijl de bagage prima past en de prijs
           // gewoon berekend kon worden -- zonder deze tak viel dat geval
           // ten onrechte terug op de generieke priceError-melding hieronder.
+          //
+          // 1 oktober 2026 (Hans): capaciteit wordt bewust VOOR bagage
+          // gecheckt. Reden: bij een volgeboekte categorie helpt het de
+          // klant niet om de bagage aan te passen (bijv. minder stuks) --
+          // die auto is sowieso niet beschikbaar, ongeacht de bagagekeuze.
+          // Zou bagage eerst getoond worden, dan kan dat ten onrechte de
+          // indruk wekken dat een andere bagagekeuze het zou oplossen.
           let reasonText;
-          if (!vehicle.baggage.fits) {
-            reasonText = vehicle.baggage.reason || "Bagage past niet in dit voertuig.";
-          } else if (vehicle.capacity && vehicle.capacity.full) {
+          if (vehicle.capacity && vehicle.capacity.full) {
             reasonText = vehicle.capacity.reason || "Dit voertuigtype is voor het gekozen tijdstip helaas al volgeboekt.";
+          } else if (!vehicle.baggage.fits) {
+            reasonText = vehicle.baggage.reason || "Bagage past niet in dit voertuig.";
           } else {
             reasonText = vehicle.priceError || "Prijs kon niet berekend worden.";
           }

@@ -169,6 +169,14 @@
       baggageCounts: {},
       specialBaggageId: "geen",
       airportBaggageAnswer: null,
+      // 2 oktober 2026 (Hans): vluchtnummer, gevraagd zodra de rit op een
+      // luchthaven BEGINT (dus een aankomende passagier die wordt
+      // opgehaald, zie isAirportPickup hieronder) -- zodat de
+      // chauffeur/planning de vlucht kan volgen (vertraging, geland, etc.).
+      // Los van `note` omdat taxiID's eigen Ride-schema hier een
+      // toegewijd veld voor heeft (`flightNumber`, zie taxiidClient.js
+      // backend-kant), geen vrije tekst.
+      flightNumber: "",
       note: "",
       priceResult: null,
       priceError: null,
@@ -474,6 +482,12 @@
         destinationAddress: state.destination.text,
         passenger: { ...state.passenger, language: detectPageLanguageCode() },
         note: noteParts.join(" ") || undefined,
+        // Los van `note`: taxiID's Ride-schema heeft hier een eigen
+        // `flightNumber`-veld voor (zie backend/taxiidClient.js). Alleen
+        // relevant/ingevuld bij isAirportPickup() -- in alle andere
+        // gevallen blijft state.flightNumber op zijn standaard lege
+        // waarde staan.
+        flightNumber: state.flightNumber.trim() || undefined,
       };
 
       try {
@@ -679,6 +693,35 @@
       container.appendChild(renderAddressField("Bestemming", "destination", updateServiceAreaWarning));
       container.appendChild(serviceAreaWarning);
 
+      // Vluchtnummer (Hans, 2 oktober 2026): verschijnt zodra de
+      // OPHAALLOCATIE een luchthaven is (isAirportPickup, zelfde regel als
+      // de bagageband-vraag in renderBaggageStep) -- dus alleen bij een
+      // aankomende passagier die wordt opgehaald, niet bij een rit NAAR de
+      // luchthaven. Bewust hier op stap 1 (niet in de bagage-stap): bij
+      // "Heeft u bagage die mee moet?" -> "Nee" wordt de bagage-stap
+      // overgeslagen (zie de knop hieronder), en het vluchtnummer is dan nog
+      // steeds nodig.
+      if (isAirportPickup()) {
+        const flightWrapper = el("div", { class: "wnt-field" });
+        flightWrapper.appendChild(el("label", { text: "Vluchtnummer" }));
+        flightWrapper.appendChild(
+          el("input", {
+            type: "text",
+            value: state.flightNumber,
+            placeholder: "bijv. KL1234",
+            oninput: (e) => {
+              state.flightNumber = e.target.value;
+            },
+          })
+        );
+        flightWrapper.appendChild(
+          el("p", { class: "wnt-hint" }, [
+            "Zo kunnen we de vlucht volgen en op tijd klaarstaan, ook bij vertraging.",
+          ])
+        );
+        container.appendChild(flightWrapper);
+      }
+
       const dateWrapper = el("div", { class: "wnt-field" });
       dateWrapper.appendChild(el("label", { text: "Ophaaldatum en -tijd" }));
       dateWrapper.appendChild(
@@ -787,6 +830,16 @@
             if (!isFieldConfirmed(state.destination)) {
               alert(
                 `We kunnen "${state.destination.text}" niet herkennen als geldige bestemming. Begin opnieuw te typen in het bestemmingsveld en kies één van de voorgestelde adressen uit de lijst die verschijnt.`
+              );
+              return;
+            }
+            // Vluchtnummer verplicht bij een luchthaven-ophaalrit (Hans, 2
+            // oktober 2026, expliciete keuze: "Verplicht veld" i.p.v.
+            // optioneel) -- zelfde blokkerende patroon als de adrescontrole
+            // hierboven en de bagageband-vraag in renderBaggageStep.
+            if (isAirportPickup() && !state.flightNumber.trim()) {
+              alert(
+                "Vul het vluchtnummer in, zodat we de vlucht kunnen volgen en op tijd voor u klaarstaan."
               );
               return;
             }

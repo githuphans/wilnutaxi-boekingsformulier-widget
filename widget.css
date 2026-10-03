@@ -403,3 +403,32 @@
     font-size: 1em;
   }
 }
+
+/* Geocoding-bevestigingsvraag ("Bedoelt u Eindhoven Airport?"), zie
+   renderAddressField/updatePoiConfirm in widget.js (3 oktober 2026). Zelfde
+   soort opvallende banner als .wnt-warning, maar neutraal/accent-gekleurd
+   in plaats van waarschuwend-oranje: dit is een vraag, geen waarschuwing. */
+.wnt-poi-confirm {
+  margin: 0.5rem 0 0;
+  padding: 0.7em 0.9em;
+  background: var(--wnt-bg-subtle);
+  border: 1px solid var(--wnt-border);
+  border-radius: var(--wnt-radius);
+  font-size: 0.9em;
+}
+
+.wnt-poi-confirm-question {
+  margin: 0 0 0.5em;
+}
+
+.wnt-poi-confirm-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.wnt-poi-confirm-buttons .wnt-button-small {
+  margin-top: 0;
+  padding: 0.5em 1em;
+  font-size: 0.9em;
+}

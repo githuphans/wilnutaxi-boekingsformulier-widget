@@ -37,13 +37,16 @@
  * - Boeken (POST /api/book), met een bevestigingsscherm inclusief
  *   track-and-trace-link.
  *
+ * Sinds 3 oktober 2026: de zone-herkenning van een vrij getypt adres
+ * gebeurt niet meer via een komma-gok, en een letterlijk getypt POI-adres
+ * levert nu de startdocument-bevestigingsvraag op ("Bedoelt u Eindhoven
+ * Airport?") — zie resolveAddressZoneAndPoiMatch hieronder en
+ * src/maps/resolveAddress.js in de backend. `guessZoneFromAddress` bestaat
+ * nog, puur als stille terugval zodra die aanroep een keer niet lukt.
+ *
  * Wat bewust nog NIET (goed) zit — zie widget/README.md voor de volledige
- * lijst: de geocoding-bevestigingsvraag bij een letterlijk getypt
- * POI-adres uit het startdocument ("Bedoelt u Eindhoven Airport?" — nu
- * alleen exacte naam/adres-matching, geen echte geocoding-vergelijking),
- * de zone-herkenning uit een getypt huisadres (nu een simpele gok, zie
- * `guessZoneFromAddress`), online betalen, en huisstijl-afstemming met de
- * echte Elementor-pagina (nu een neutrale eigen stijl via CSS-variabelen).
+ * lijst: online betalen, en huisstijl-afstemming met de echte
+ * Elementor-pagina (nu een neutrale eigen stijl via CSS-variabelen).
  */
 (function () {
   "use strict";
@@ -139,8 +142,18 @@
       // of Google Places) is gekozen, of exact met zo'n suggestie
       // overeenkomt. Zolang dat niet zo is, mag de klant niet verder — zie
       // isFieldConfirmed/renderAddressField.
-      origin: { text: "", poiId: null, confirmed: false },
-      destination: { text: "", poiId: null, confirmed: false },
+      // zone/poiConfirmPending: zie resolveAddressZoneAndPoiMatch hieronder
+      // (3 oktober 2026) -- de vervanging van de komma-gok door Google's
+      // eigen locatiedata, en de geocoding-bevestigingsvraag uit het
+      // startdocument ("Bedoelt u Eindhoven Airport?"). `zone` is de via
+      // GET /api/resolve-address herkende plaatsnaam voor dit adres (null
+      // zolang die nog niet (succesvol) is opgevraagd -- dan valt
+      // resolveZone terug op de oude komma-gok). `poiConfirmPending` is
+      // gezet zodra dat adres in de praktijk hetzelfde blijkt te zijn als
+      // een bekende POI die niet via naam/snelkeuze gekozen is; de klant
+      // moet dat eerst bevestigen of afwijzen (zie renderAddressField).
+      origin: { text: "", poiId: null, confirmed: false, zone: null, poiConfirmPending: null },
+      destination: { text: "", poiId: null, confirmed: false, zone: null, poiConfirmPending: null },
       // Wordt true zodra een aanroep naar /api/places-autocomplete is
       // mislukt (bv. Places API niet ingeschakeld voor de sleutel) — dan
       // laten we vrije tekst wél toe, met een zichtbare melding, in plaats
@@ -210,6 +223,12 @@
         const poi = findPoiById(field.poiId);
         if (poi && poi.zone) return poi.zone;
       }
+      // field.zone: de via GET /api/resolve-address herkende, echte
+      // plaatsnaam (zie resolveAddressZoneAndPoiMatch hieronder, 3 oktober
+      // 2026) -- vervangt hier de komma-gok zodra die bekend is. Is die
+      // aanroep (nog) niet gelukt (storing, of nog niet afgerond), dan valt
+      // dit terug op de oude gok -- fail-safe, nooit erger dan voorheen.
+      if (field.zone) return field.zone;
       return guessZoneFromAddress(field.text);
     }
 
@@ -277,6 +296,39 @@
       }
     }
 
+    // Haalt, voor een BEVESTIGD adres dat niet via een eigen POI-snelkeuze
+    // gekozen is, de door Google herkende zone op en controleert of dit
+    // adres in de praktijk hetzelfde is als een bekende POI (zie
+    // src/maps/resolveAddress.js in de backend, 3 oktober 2026 — vervangt
+    // de komma-gok en bouwt de startdocument-bevestigingsvraag "Bedoelt u
+    // Eindhoven Airport?"). Roept zelf render() aan zodra het antwoord
+    // binnen is (dit gebeurt na een netwerk-rondje, dus nooit synchroon
+    // binnen de aanroepende render-cyclus).
+    async function resolveAddressZoneAndPoiMatch(field) {
+      if (field.poiId) return; // kent al zijn eigen, beheerde zone.
+      const address = field.text.trim();
+      if (!address) return;
+      try {
+        const response = await fetch(`${apiBase}/api/resolve-address?address=${encodeURIComponent(address)}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        // De klant kan intussen zijn doorgetypt (een nieuwere aanroep is
+        // dan al onderweg of al afgehandeld) — een verlaat antwoord dat
+        // niet meer bij de huidige tekst van dit veld past, negeren we,
+        // anders zou een oudere zone/bevestigingsvraag over nieuwere tekst
+        // heen kunnen vallen.
+        if (field.text.trim() !== address) return;
+        field.zone = data.zone || null;
+        field.poiConfirmPending = data.poiMatch || null;
+      } catch (err) {
+        // Verrijking, geen harde vereiste (zelfde aanpak als
+        // fetchAddressSuggestionsNow hierboven) — bij een storing blijft de
+        // widget gewoon werken met de oude komma-gok en zonder
+        // bevestigingsvraag.
+      }
+      render();
+    }
+
     // De backend verwacht `passengerCount` als TOTAAL aantal inzittenden
     // (volwassenen + kinderen samen, zie checkVehicleFit in de backend) --
     // `childCount` komt er apart bovenop voor de volwassene/kinderen-
@@ -315,7 +367,10 @@
         return {
           direction: "heen",
           poiId: state.destination.poiId,
-          fixedRouteZone: guessZoneFromAddress(state.origin.text),
+          // resolveZone (in plaats van rechtstreeks guessZoneFromAddress,
+          // 3 oktober 2026): gebruikt de via Google herkende zone van het
+          // ophaaladres zodra die bekend is, met de oude gok als vangnet.
+          fixedRouteZone: resolveZone(state.origin),
           poi,
         };
       }
@@ -324,7 +379,7 @@
         return {
           direction: "terug",
           poiId: state.origin.poiId,
-          fixedRouteZone: guessZoneFromAddress(state.destination.text),
+          fixedRouteZone: resolveZone(state.destination),
           poi,
         };
       }
@@ -529,9 +584,17 @@
         field.text = text;
         field.poiId = poiId || null;
         field.confirmed = true;
+        // Nieuwe tekst -> een eventuele oudere zone/bevestigingsvraag is
+        // niet meer geldig (zie resolveAddressZoneAndPoiMatch).
+        field.zone = null;
+        field.poiConfirmPending = null;
         suggestions.hidden = true;
         if (onFieldChange) onFieldChange();
         render();
+        // Alleen de moeite waard voor een gewoon (niet via POI-snelkeuze
+        // gekozen) adres -- resolveAddressZoneAndPoiMatch slaat zelf over
+        // als field.poiId al gezet is.
+        resolveAddressZoneAndPoiMatch(field);
       }
 
       function renderSuggestionList(query) {
@@ -614,12 +677,71 @@
       }
       updateRecognized();
 
+      // De geocoding-bevestigingsvraag uit het startdocument ("Bedoelt u
+      // Eindhoven Airport? Dan geldt ons vaste tarief en vragen we straks
+      // naar uw vluchtnummer.") — getoond zodra resolveAddressZoneAndPoiMatch
+      // hierboven een poiMatch teruggeeft voor een adres dat de klant zelf
+      // (niet via de naam/snelkeuze) heeft ingevoerd. "Ja" laat dit veld
+      // vanaf dan precies werken als een POI-snelkeuze (vaste prijs,
+      // vluchtnummer-vraag bij een luchthaven-ophaalrit, enz.); "Nee" laat
+      // het gewoon een los adres blijven (met de inmiddels bekende, echte
+      // zone, geen komma-gok meer).
+      const poiConfirm = el("div", { class: "wnt-poi-confirm", hidden: true });
+
+      function updatePoiConfirm() {
+        const match = field.poiConfirmPending;
+        poiConfirm.innerHTML = "";
+        if (!match) {
+          poiConfirm.hidden = true;
+          return;
+        }
+        const question =
+          match.category === "Vliegveld"
+            ? `Bedoelt u ${match.name}? Dan geldt ons vaste tarief en vragen we straks naar uw vluchtnummer.`
+            : `Bedoelt u ${match.name}? Dan geldt ons vaste tarief.`;
+        poiConfirm.appendChild(el("p", { class: "wnt-poi-confirm-question" }, [question]));
+        poiConfirm.appendChild(
+          el("div", { class: "wnt-poi-confirm-buttons" }, [
+            el("button", {
+              type: "button",
+              class: "wnt-button wnt-button-primary wnt-button-small",
+              text: `Ja, dat klopt`,
+              onclick: () => {
+                field.poiId = match.id;
+                field.text = match.name;
+                field.zone = null;
+                field.poiConfirmPending = null;
+                field.confirmed = true;
+                if (onFieldChange) onFieldChange();
+                render();
+              },
+            }),
+            el("button", {
+              type: "button",
+              class: "wnt-button wnt-button-secondary wnt-button-small",
+              text: "Nee, dit gewone adres",
+              onclick: () => {
+                field.poiConfirmPending = null;
+                if (onFieldChange) onFieldChange();
+                render();
+              },
+            }),
+          ])
+        );
+        poiConfirm.hidden = false;
+      }
+      updatePoiConfirm();
+
       const input = el("input", {
         type: "text",
         value: field.text,
         placeholder: "Adres, plaatsnaam of bekende bestemming",
         oninput: (e) => {
           field.text = e.target.value;
+          // Nieuwe tekst -> een eventuele oudere zone/bevestigingsvraag is
+          // niet meer geldig (zie resolveAddressZoneAndPoiMatch).
+          field.zone = null;
+          field.poiConfirmPending = null;
           const poiMatch = matchPoiByText(field.text);
           if (poiMatch) {
             field.poiId = poiMatch.id;
@@ -630,6 +752,7 @@
               (s) => s.description.trim().toLowerCase() === field.text.trim().toLowerCase()
             );
             field.confirmed = !!exactPlaceMatch;
+            if (field.confirmed) resolveAddressZoneAndPoiMatch(field);
           }
           refreshSuggestions(field.text);
           updateRecognized();
@@ -642,6 +765,7 @@
       wrapper.appendChild(input);
       wrapper.appendChild(suggestions);
       wrapper.appendChild(recognized);
+      wrapper.appendChild(poiConfirm);
 
       return wrapper;
     }

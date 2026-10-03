@@ -737,6 +737,7 @@
         value: field.text,
         placeholder: "Adres, plaatsnaam of bekende bestemming",
         oninput: (e) => {
+          const hadPoiId = !!field.poiId;
           field.text = e.target.value;
           // Nieuwe tekst -> een eventuele oudere zone/bevestigingsvraag is
           // niet meer geldig (zie resolveAddressZoneAndPoiMatch).
@@ -757,6 +758,19 @@
           refreshSuggestions(field.text);
           updateRecognized();
           if (onFieldChange) onFieldChange();
+          // Hans, 4 oktober 2026: typt een klant het adres van een POI
+          // letterlijk exact uit (matchPoiByText hierboven), dan wordt
+          // field.poiId meteen gezet -- maar de hierboven gedane updates
+          // zijn bewust lokaal (geen volledige render(), om de cursor
+          // tijdens gewoon typen niet te laten springen). Daardoor bleef
+          // bijvoorbeeld het Vluchtnummer-veld (isAirportPickup(), alleen
+          // zichtbaar via een volledige render()) verborgen totdat er
+          // toevallig ergens anders iets een render triggerde. Fix:
+          // alleen bij een daadwerkelijke overgang (poiId gezet/ontzet),
+          // niet bij elke toetsaanslag, alsnog een volledige render().
+          if (!!field.poiId !== hadPoiId) {
+            render();
+          }
         },
         onfocus: () => refreshSuggestions(field.text),
         onblur: () => setTimeout(() => (suggestions.hidden = true), 150),

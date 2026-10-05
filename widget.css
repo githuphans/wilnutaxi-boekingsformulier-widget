@@ -443,3 +443,12 @@
 .wnt-flight-info .wnt-warning {
   margin-top: 0.4em;
 }
+
+/* 5 oktober 2026: zelf geplande landingstijd invullen onder het Vluchtnummer-veld. */
+.wnt-flight-manual {
+  margin-top: 0.6em;
+}
+.wnt-flight-manual input[type="time"] {
+  display: block;
+  margin: 0.3em 0 0.5em;
+}

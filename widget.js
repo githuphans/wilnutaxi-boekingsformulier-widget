@@ -193,6 +193,10 @@
       // 5 oktober 2026: resultaat van de vluchtopzoeking (GET
       // /api/flight-lookup), { key, status, flights } -- alleen informatief.
       flightInfo: null,
+      // 5 oktober 2026 (Hans): geplande landingstijd die de passagier zelf
+      // invult ("HH:MM") als de opzoeking er geen kon geven.
+      flightManualLanding: "",
+      flightManualOpen: false,
       note: "",
       priceResult: null,
       priceError: null,
@@ -488,12 +492,87 @@
       }).format(new Date(iso));
     }
 
+    // Landingstijd uit de opzoeking (ISO) of null.
+    function lookedUpLandingIso() {
+      const info = state.flightInfo;
+      if (!info || info.status !== "found" || !info.flights || !info.flights.length) return null;
+      const leg = pickFlightLeg(info.flights);
+      return leg.estimatedArrivalUtc || leg.scheduledArrivalUtc || null;
+    }
+
+    // Door de passagier ingevulde landingstijd als Date, op de ophaaldag.
+    // Landt de vlucht 's avonds en is de rit na middernacht (tijd ligt dan
+    // meer dan 12 uur NA de ophaaltijd), dan nemen we de dag ervoor.
+    function manualLandingDate() {
+      const match = /^(\d{1,2}):(\d{2})$/.exec(state.flightManualLanding || "");
+      if (!match || lookedUpLandingIso()) return null;
+      const pickup = getEffectiveDateTime();
+      const landing = new Date(pickup);
+      landing.setHours(Number(match[1]), Number(match[2]), 0, 0);
+      if (landing.getTime() - pickup.getTime() > 12 * 3600 * 1000) landing.setDate(landing.getDate() - 1);
+      return landing;
+    }
+
+    // Knop/veld om de geplande landingstijd zelf in te vullen, getoond zodra
+    // er een vluchtnummer staat en de opzoeking geen landingstijd gaf.
+    function renderManualLanding() {
+      if (!state.flightNumber.trim() || lookedUpLandingIso()) return null;
+      if (state.flightInfo && state.flightInfo.status === "pending") return null;
+      const wrapper = el("div", { class: "wnt-flight-manual" });
+      if (!state.flightManualOpen && !state.flightManualLanding) {
+        wrapper.appendChild(
+          el("button", {
+            type: "button",
+            class: "wnt-button wnt-button-secondary wnt-button-small",
+            text: "Geplande landingstijd zelf invullen",
+            onclick: () => {
+              state.flightManualOpen = true;
+              render();
+            },
+          })
+        );
+        return wrapper;
+      }
+      wrapper.appendChild(el("label", { text: "Geplande landingstijd (volgens uw ticket)" }));
+      wrapper.appendChild(
+        el("input", {
+          type: "time",
+          value: state.flightManualLanding,
+          onchange: (e) => {
+            state.flightManualLanding = e.target.value || "";
+            render();
+          },
+        })
+      );
+      wrapper.appendChild(
+        el("button", {
+          type: "button",
+          class: "wnt-button wnt-button-secondary wnt-button-small",
+          text: "Wissen",
+          onclick: () => {
+            state.flightManualLanding = "";
+            state.flightManualOpen = false;
+            render();
+          },
+        })
+      );
+      const landing = manualLandingDate();
+      if (landing && getEffectiveDateTime().getTime() < landing.getTime()) {
+        wrapper.appendChild(
+          el("p", { class: "wnt-warning" }, [
+            `Let op: uw vlucht landt om ${formatClock(landing.toISOString())}, na uw gekozen ophaaltijd (${formatClock(getEffectiveDateTime().toISOString())}). Pas de ophaaltijd zo nodig aan.`,
+          ])
+        );
+      }
+      return wrapper;
+    }
+
     function renderFlightInfo() {
       const info = state.flightInfo;
       if (!info) {
         if (state.flightNumber.trim() && !normalizeFlightNumberInput(state.flightNumber)) {
           return el("p", { class: "wnt-hint wnt-flight-info" }, [
-            "Dit lijkt geen vluchtnummer. Een vluchtnummer ziet er bijvoorbeeld zo uit: KL1234.",
+            "Dit lijkt geen vluchtnummer. Een vluchtnummer bestaat uit twee letters/cijfers en een nummer, bijvoorbeeld KL1234 of KL 1234.",
           ]);
         }
         return null;
@@ -669,6 +748,12 @@
           );
         }
       }
+      if (isAirportPickup()) {
+        const manualLanding = manualLandingDate();
+        if (manualLanding) {
+          noteParts.push(`Geplande landingstijd (door passagier opgegeven): ${formatClock(manualLanding.toISOString())}.`);
+        }
+      }
       if (state.note) noteParts.push(state.note);
 
       const body = {
@@ -692,7 +777,7 @@
         // relevant/ingevuld bij isAirportPickup() -- in alle andere
         // gevallen blijft state.flightNumber op zijn standaard lege
         // waarde staan.
-        flightNumber: state.flightNumber.trim() || undefined,
+        flightNumber: normalizeFlightNumberInput(state.flightNumber) || state.flightNumber.trim() || undefined,
       };
 
       try {
@@ -996,7 +1081,7 @@
           el("input", {
             type: "text",
             value: state.flightNumber,
-            placeholder: "bijv. KL1234",
+            placeholder: "bijv. KL1234 of KL 1234",
             oninput: (e) => {
               state.flightNumber = e.target.value;
             },
@@ -1009,11 +1094,13 @@
         );
         flightWrapper.appendChild(
           el("p", { class: "wnt-hint" }, [
-            "Zo kunnen we de vlucht volgen en op tijd klaarstaan, ook bij vertraging.",
+            "Zo kunnen we de vlucht volgen en op tijd klaarstaan, ook bij vertraging. U mag het vluchtnummer met of zonder spatie invullen: KL1234 of KL 1234.",
           ])
         );
         const flightInfoNode = renderFlightInfo();
         if (flightInfoNode) flightWrapper.appendChild(flightInfoNode);
+        const manualLandingNode = renderManualLanding();
+        if (manualLandingNode) flightWrapper.appendChild(manualLandingNode);
         container.appendChild(flightWrapper);
       }
 

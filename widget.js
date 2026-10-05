@@ -190,6 +190,9 @@
       // toegewijd veld voor heeft (`flightNumber`, zie taxiidClient.js
       // backend-kant), geen vrije tekst.
       flightNumber: "",
+      // 5 oktober 2026: resultaat van de vluchtopzoeking (GET
+      // /api/flight-lookup), { key, status, flights } -- alleen informatief.
+      flightInfo: null,
       note: "",
       priceResult: null,
       priceError: null,
@@ -397,6 +400,137 @@
       if (!state.origin.poiId) return false;
       const poi = findPoiById(state.origin.poiId);
       return !!(poi && poi.category === "Vliegveld");
+    }
+
+    // --- Vluchtopzoeking (5 oktober 2026, Hans) ------------------------
+    // Na het invullen van het vluchtnummer zoeken we via de backend
+    // (GET /api/flight-lookup, AeroDataBox) herkomst en geplande aankomst
+    // op en tonen die onder het veld: de klant ziet een typefout meteen,
+    // en we waarschuwen als de vlucht pas NA het gekozen ophaaltijdstip
+    // landt. Puur informatief: een mislukte of lege opzoeking blokkeert
+    // nooit en het ingevulde vluchtnummer blijft gewoon staan.
+    const FLIGHT_NUMBER_PATTERN = /^[A-Z0-9]{2}\d{1,4}[A-Z]?$/;
+
+    function normalizeFlightNumberInput(raw) {
+      const cleaned = String(raw || "").toUpperCase().replace(/[\s-]+/g, "");
+      return FLIGHT_NUMBER_PATTERN.test(cleaned) ? cleaned : null;
+    }
+
+    function localDateString(date) {
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    }
+
+    function flightLookupKey() {
+      const flight = normalizeFlightNumberInput(state.flightNumber);
+      if (!flight) return null;
+      return `${flight}|${localDateString(getEffectiveDateTime())}`;
+    }
+
+    async function lookupFlightInfo() {
+      if (!isAirportPickup()) return;
+      const key = flightLookupKey();
+      if (!key) {
+        state.flightInfo = null;
+        render();
+        return;
+      }
+      if (state.flightInfo && state.flightInfo.key === key) return;
+      state.flightInfo = { key, status: "pending", flights: [] };
+      render();
+      const [flight, date] = key.split("|");
+      let result = { key, status: "unavailable", flights: [] };
+      try {
+        const response = await fetch(
+          `${apiBase}/api/flight-lookup?flight=${encodeURIComponent(flight)}&date=${encodeURIComponent(date)}`
+        );
+        const data = await response.json();
+        result = { key, status: data.status || "unavailable", flights: data.flights || [] };
+      } catch (err) {
+        // Stil negeren: de opzoeking is een extraatje, geen vereiste.
+      }
+      // Is de klant inmiddels iets anders gaan invullen, dan negeren we dit
+      // verouderde antwoord.
+      if (!state.flightInfo || state.flightInfo.key !== key) return;
+      state.flightInfo = result;
+      render();
+    }
+
+    // Bij een vlucht met meerdere etappes: kies de etappe die op de gekozen
+    // luchthaven aankomt (op naam/plaats), anders de eerste.
+    function pickFlightLeg(flights) {
+      const poi = findPoiById(state.origin.poiId);
+      const poiName = poi ? String(poi.name).toLowerCase() : "";
+      const ignore = ["airport", "international", "intl", "airfield"];
+      const words = (text) =>
+        String(text || "")
+          .toLowerCase()
+          .split(/[^a-z\u00e0-\u00ff]+/)
+          .filter((w) => w.length >= 4 && ignore.indexOf(w) === -1);
+      const match = flights.find((f) =>
+        words(`${f.destination && f.destination.name} ${f.destination && f.destination.city}`).some((w) => poiName.indexOf(w) !== -1)
+      );
+      return match || flights[0];
+    }
+
+    function formatClock(iso, timeZone) {
+      return new Intl.DateTimeFormat("nl-NL", { hour: "2-digit", minute: "2-digit", timeZone: timeZone || "Europe/Amsterdam" }).format(new Date(iso));
+    }
+
+    function formatDayAndClock(iso, timeZone) {
+      return new Intl.DateTimeFormat("nl-NL", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: timeZone || "Europe/Amsterdam",
+      }).format(new Date(iso));
+    }
+
+    function renderFlightInfo() {
+      const info = state.flightInfo;
+      if (!info) {
+        if (state.flightNumber.trim() && !normalizeFlightNumberInput(state.flightNumber)) {
+          return el("p", { class: "wnt-hint wnt-flight-info" }, [
+            "Dit lijkt geen vluchtnummer. Een vluchtnummer ziet er bijvoorbeeld zo uit: KL1234.",
+          ]);
+        }
+        return null;
+      }
+      if (info.status === "pending") {
+        return el("p", { class: "wnt-hint wnt-flight-info", text: "Vlucht opzoeken…" });
+      }
+      if (info.status === "not_found") {
+        return el("p", { class: "wnt-hint wnt-flight-info" }, [
+          "We konden dit vluchtnummer niet vinden voor deze datum. Controleer het nummer en de ophaaldatum. U kunt ook gewoon doorgaan.",
+        ]);
+      }
+      if (info.status !== "found" || !info.flights || !info.flights.length) return null;
+
+      const leg = pickFlightLeg(info.flights);
+      const tz = leg.arrivalTimeZone || "Europe/Amsterdam";
+      const where = [leg.origin.city || leg.origin.name, leg.origin.iata ? `(${leg.origin.iata})` : ""].filter(Boolean).join(" ");
+      const wrapper = el("div", { class: "wnt-flight-info" });
+      const landing = leg.estimatedArrivalUtc || leg.scheduledArrivalUtc;
+      const parts = [el("strong", { text: leg.number || normalizeFlightNumberInput(state.flightNumber) }), ` komt uit ${where}`];
+      if (leg.scheduledArrivalUtc) {
+        parts.push(`, geplande aankomst ${formatDayAndClock(leg.scheduledArrivalUtc, tz)}`);
+        if (leg.estimatedArrivalUtc && leg.estimatedArrivalUtc !== leg.scheduledArrivalUtc) {
+          parts.push(` (verwacht ${formatClock(leg.estimatedArrivalUtc, tz)})`);
+        }
+      }
+      parts.push(". Klopt dit? Zo niet, controleer dan het vluchtnummer.");
+      wrapper.appendChild(el("p", { class: "wnt-hint" }, parts));
+
+      if (landing && getEffectiveDateTime().getTime() < new Date(landing).getTime()) {
+        wrapper.appendChild(
+          el("p", { class: "wnt-warning" }, [
+            `Let op: deze vlucht landt om ${formatClock(landing, tz)}, na uw gekozen ophaaltijd (${formatClock(getEffectiveDateTime().toISOString(), tz)}). Pas de ophaaltijd zo nodig aan.`,
+          ])
+        );
+      }
+      return wrapper;
     }
 
     // Heeft de klant al "Grote ruimbagage" opgegeven, dan weten we al dat er
@@ -866,6 +1000,11 @@
             oninput: (e) => {
               state.flightNumber = e.target.value;
             },
+            // Pas bij verlaten van het veld opzoeken (niet bij elke
+            // toetsaanslag: bespaart aanroepen en laat de cursor met rust).
+            onchange: () => {
+              lookupFlightInfo();
+            },
           })
         );
         flightWrapper.appendChild(
@@ -873,6 +1012,8 @@
             "Zo kunnen we de vlucht volgen en op tijd klaarstaan, ook bij vertraging.",
           ])
         );
+        const flightInfoNode = renderFlightInfo();
+        if (flightInfoNode) flightWrapper.appendChild(flightInfoNode);
         container.appendChild(flightWrapper);
       }
 
@@ -888,6 +1029,8 @@
               state.dateTimeTouched = true;
             }
             render();
+            // Andere ophaaldag: de vluchtopzoeking geldt per datum.
+            if (isAirportPickup() && state.flightNumber.trim()) lookupFlightInfo();
           },
         })
       );
@@ -1271,6 +1414,37 @@
             reasonText = vehicle.priceError || "Prijs kon niet berekend worden.";
           }
           card.appendChild(el("p", { class: "wnt-vehicle-reason" }, [reasonText]));
+          // 5 oktober 2026 (Hans): is een categorie vol, dan geeft de server
+          // (vehicle.capacity.nextAvailableAt) het eerste LATERE tijdstip
+          // waarop er weer een auto vrij is. Bewust alleen later, nooit
+          // eerder (een eerder moment kan onder de 24-uursgrens vallen).
+          // De knop neemt dat tijdstip over en rekent de prijs opnieuw uit
+          // -- de prijs kan op dat moment anders zijn (nacht-/weekendtoeslag).
+          if (vehicle.capacity && vehicle.capacity.full && vehicle.capacity.nextAvailableAt) {
+            const nextAt = new Date(vehicle.capacity.nextAvailableAt);
+            if (!isNaN(nextAt.getTime())) {
+              card.appendChild(
+                el("p", { class: "wnt-vehicle-next-available" }, [
+                  "Wel beschikbaar vanaf ",
+                  el("strong", { text: formatDateTime(nextAt) }),
+                  ".",
+                ])
+              );
+              card.appendChild(
+                el("button", {
+                  type: "button",
+                  class: "wnt-button wnt-button-secondary",
+                  text: "Kies dit tijdstip",
+                  disabled: state.submitting,
+                  onclick: () => {
+                    state.dateTime = nextAt;
+                    state.dateTimeTouched = true;
+                    fetchPrice();
+                  },
+                })
+              );
+            }
+          }
         }
         if (vehicle.price && vehicle.price.warnings && vehicle.price.warnings.length) {
           vehicle.price.warnings.forEach((w) => card.appendChild(el("p", { class: "wnt-vehicle-warning", text: w })));

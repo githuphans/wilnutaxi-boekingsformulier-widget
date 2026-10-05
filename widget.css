@@ -389,6 +389,12 @@
   color: var(--wnt-text-muted);
 }
 
+/* 5 oktober 2026: "Wel beschikbaar vanaf ..." bij een volle categorie. */
+.wnt-vehicle-next-available {
+  font-size: 0.9em;
+  margin: 0.4em 0;
+}
+
 /* 29 augustus 2026: kleine correctie voor smalle (mobiele) schermen — de
    stap-koppen mogen daar iets bescheidener, en de widget hoeft dan niet
    nog een keer extra zijmarge te reserveren bovenop wat de pagina zelf al
@@ -431,4 +437,9 @@
   margin-top: 0;
   padding: 0.5em 1em;
   font-size: 0.9em;
+}
+
+/* 5 oktober 2026: resultaat van de vluchtopzoeking onder het Vluchtnummer-veld. */
+.wnt-flight-info .wnt-warning {
+  margin-top: 0.4em;
 }

@@ -409,8 +409,23 @@
       return (state.baggageCounts.grote_ruimbagage || 0) > 0;
     }
 
+    // Hans, 5 oktober 2026: "Als er afwijkende bagage wordt gekozen en de
+    // klant heeft geen grote koffer bij, dan komt toch de vraag over bagage
+    // van de band -- dat lijkt me overbodig." Klopt: een skiset, rollator,
+    // rolstoel, scootmobiel, kinderwagen of golfset reist als ruimbagage (of
+    // via de balie voor bijzondere bagage) en moet na de landing opgehaald
+    // worden, net als een grote koffer. Het antwoord staat dus al vast en de
+    // losse vraag wordt niet meer gesteld.
+    function hasSpecialBaggage() {
+      return !!state.specialBaggageId && state.specialBaggageId !== "geen";
+    }
+
+    function hasBaggageToCollect() {
+      return hasLargeCheckedBaggage() || hasSpecialBaggage();
+    }
+
     function shouldAskAirportBaggageQuestion() {
-      return isAirportPickup() && !hasLargeCheckedBaggage();
+      return isAirportPickup() && !hasBaggageToCollect();
     }
 
     // Vroege, informatieve werkgebied-check (Hans, 19 augustus 2026, na zijn
@@ -507,10 +522,11 @@
       const meta = determineRideMeta();
       const noteParts = [];
       if (isAirportPickup()) {
-        // Grote ruimbagage opgegeven? Dan staat het antwoord feitelijk al
-        // vast, ook als de vraag zelf (bewust) niet gesteld is -- zie
+        // Grote ruimbagage of bijzondere bagage opgegeven? Dan staat het
+        // antwoord feitelijk al vast, ook als de vraag zelf (bewust) niet
+        // gesteld is -- zie
         // shouldAskAirportBaggageQuestion hierboven.
-        const effectiveAnswer = hasLargeCheckedBaggage() ? "ruimbagage" : state.airportBaggageAnswer;
+        const effectiveAnswer = hasBaggageToCollect() ? "ruimbagage" : state.airportBaggageAnswer;
         if (effectiveAnswer) {
           noteParts.push(
             effectiveAnswer === "ruimbagage"
@@ -1065,6 +1081,10 @@
       const select = el("select", {
         onchange: (e) => {
           state.specialBaggageId = e.target.value;
+          // Volledige render, zodat de vraag "Bij aankomst op de luchthaven"
+          // (zie shouldAskAirportBaggageQuestion) meteen verdwijnt/verschijnt
+          // zodra bijzondere bagage wordt gekozen of weer op "geen" gezet.
+          render();
         },
       });
       (state.config.specialBaggageOptions || []).forEach((option) => {

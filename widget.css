@@ -273,6 +273,18 @@
   margin-right: 0.5rem;
 }
 
+/* Rode knop: verplichte actie (ophaaltijd aanpassen aan de landing). */
+.wnt-button-danger {
+  background: var(--wnt-error);
+  border-color: var(--wnt-error);
+  color: #fff;
+  font-weight: 600;
+}
+
+.wnt-button-danger:hover {
+  filter: brightness(0.92);
+}
+
 .wnt-vehicle-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

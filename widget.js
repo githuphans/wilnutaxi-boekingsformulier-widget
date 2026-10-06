@@ -515,7 +515,7 @@
       if (!(getEffectiveDateTime().getTime() < landingDate.getTime())) return null;
       return el("button", {
         type: "button",
-        class: "wnt-button wnt-button-secondary wnt-button-small",
+        class: "wnt-button wnt-button-danger wnt-button-small",
         text: `Ophaaltijd aanpassen aan de landing (${formatClock(landingDate.toISOString())})`,
         onclick: () => {
           adoptPickupTime(landingDate, "flight");
@@ -532,6 +532,18 @@
       if (!info || info.status !== "found" || !info.flights || !info.flights.length) return null;
       const leg = pickFlightLeg(info.flights);
       return leg.estimatedArrivalUtc || leg.scheduledArrivalUtc || null;
+    }
+
+    // Bekende landing (opzoeking of door de passagier ingevuld) die NA de
+    // gekozen ophaaltijd ligt, anders null. Hans, 6 oktober 2026: de klant
+    // mag pas naar de bagage-stap als dit is opgelost -- door de rode knop
+    // te gebruiken of zelf een ophaaltijd vanaf de landing te kiezen.
+    function landingAfterPickup() {
+      if (!isAirportPickup() || !state.flightNumber.trim()) return null;
+      const iso = lookedUpLandingIso();
+      const landing = iso ? new Date(iso) : manualLandingDate();
+      if (!landing || isNaN(landing.getTime())) return null;
+      return getEffectiveDateTime().getTime() < landing.getTime() ? landing : null;
     }
 
     // Door de passagier ingevulde landingstijd als Date, op de ophaaldag.
@@ -594,7 +606,7 @@
       if (landing && getEffectiveDateTime().getTime() < landing.getTime()) {
         wrapper.appendChild(
           el("p", { class: "wnt-warning" }, [
-            `Let op: uw vlucht landt om ${formatClock(landing.toISOString())}, na uw gekozen ophaaltijd (${formatClock(getEffectiveDateTime().toISOString())}). Pas de ophaaltijd zo nodig aan.`,
+            `Let op: uw vlucht landt om ${formatClock(landing.toISOString())}, na uw gekozen ophaaltijd (${formatClock(getEffectiveDateTime().toISOString())}). U kunt pas verder nadat u de ophaaltijd hebt aangepast.`,
           ])
         );
         const adjustButton = renderAdjustToLandingButton(landing);
@@ -641,7 +653,7 @@
       if (landing && getEffectiveDateTime().getTime() < new Date(landing).getTime()) {
         wrapper.appendChild(
           el("p", { class: "wnt-warning" }, [
-            `Let op: deze vlucht landt om ${formatClock(landing, tz)}, na uw gekozen ophaaltijd (${formatClock(getEffectiveDateTime().toISOString(), tz)}). Pas de ophaaltijd zo nodig aan.`,
+            `Let op: deze vlucht landt om ${formatClock(landing, tz)}, na uw gekozen ophaaltijd (${formatClock(getEffectiveDateTime().toISOString(), tz)}). U kunt pas verder nadat u de ophaaltijd hebt aangepast.`,
           ])
         );
         const adjustButton = renderAdjustToLandingButton(new Date(landing));
@@ -1277,6 +1289,15 @@
             if (isAirportPickup() && !state.flightNumber.trim()) {
               alert(
                 "Vul het vluchtnummer in, zodat we de vlucht kunnen volgen en op tijd voor u klaarstaan."
+              );
+              return;
+            }
+            // Ophaaltijd vóór de landing: eerst aanpassen (rode knop) voordat
+            // de klant verder kan.
+            const conflictLanding = landingAfterPickup();
+            if (conflictLanding) {
+              alert(
+                `Uw vlucht landt om ${formatClock(conflictLanding.toISOString())}, na uw gekozen ophaaltijd. Klik op de rode knop "Ophaaltijd aanpassen aan de landing" of kies zelf een later ophaaltijdstip, dan kunt u verder.`
               );
               return;
             }

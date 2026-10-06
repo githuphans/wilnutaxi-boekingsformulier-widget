@@ -1721,22 +1721,82 @@
       return container;
     }
 
+    // 6 oktober 2026 (Hans): de bevestiging toont zelf de samenvatting van de
+    // boeking, in plaats van alleen een link naar de (niet aanpasbare)
+    // taxiID-pagina. De gegevens komen uit wat de klant zojuist heeft
+    // ingevuld (state) en de bevestiging van de backend (bookResult).
+    function formatLongDateTime(date) {
+      return new Intl.DateTimeFormat("nl-NL", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Europe/Amsterdam",
+      }).format(date);
+    }
+
+    function describeBaggageForSummary() {
+      const parts = [];
+      (state.config.baggageTypes || []).forEach((type) => {
+        const count = state.baggageCounts[type.id] || 0;
+        if (count > 0) parts.push(`${count}x ${type.name}`);
+      });
+      if (state.specialBaggageId && state.specialBaggageId !== "geen") {
+        const option = (state.config.specialBaggageOptions || []).find((o) => o.id === state.specialBaggageId);
+        parts.push(option ? option.name : state.specialBaggageId);
+      }
+      return parts.length ? parts.join(", ") : "Geen bagage";
+    }
+
     function renderSuccessStep() {
-      const container = el("div", { class: "wnt-step" });
-      container.appendChild(el("h2", { text: "Boeking bevestigd" }));
+      const container = el("div", { class: "wnt-step wnt-success" });
       const result = state.bookResult;
-      container.appendChild(el("p", { text: `Bedankt! Uw rit is geboekt voor ${euro(result.price.totalEuro)}.` }));
-      if (result.trackAndTraceLink) {
-        container.appendChild(
-          el("p", {}, [
-            "Track & trace: ",
-            el("a", { href: result.trackAndTraceLink, target: "_blank", rel: "noopener", text: result.trackAndTraceLink }),
-          ])
-        );
+      const p = state.passenger;
+      container.appendChild(el("h2", { text: "Uw rit is geboekt" }));
+      container.appendChild(
+        el("p", {
+          text: `Bedankt${p.firstName ? ", " + p.firstName : ""}! Uw boeking is bevestigd. Hieronder vindt u de gegevens van uw rit.`,
+        })
+      );
+
+      const vehicle = state.priceResult && (state.priceResult.vehicles || []).find((v) => v.vehicleId === state.selectedVehicleId);
+      const rows = [];
+      if (result.reference) rows.push(["Referentie", result.reference]);
+      rows.push(["Ophalen", state.origin.text]);
+      rows.push(["Bestemming", state.destination.text]);
+      rows.push(["Datum en tijd", formatLongDateTime(getEffectiveDateTime())]);
+      if (isAirportPickup() && state.flightNumber.trim()) {
+        rows.push(["Vluchtnummer", normalizeFlightNumberInput(state.flightNumber) || state.flightNumber.trim()]);
       }
-      if (result.warnings && result.warnings.length) {
-        result.warnings.forEach((w) => container.appendChild(el("p", { class: "wnt-hint", text: w })));
-      }
+      rows.push(["Passagiers", String(totalPassengerCount())]);
+      if (vehicle) rows.push(["Voertuig", [vehicle.name, vehicle.model].filter(Boolean).join(" - ")]);
+      rows.push(["Bagage", describeBaggageForSummary()]);
+      if (state.note) rows.push(["Opmerking", state.note]);
+      rows.push(["Naam", `${p.firstName} ${p.lastName}`.trim()]);
+      rows.push(["Telefoonnummer", p.phoneNumber]);
+      rows.push(["E-mailadres", p.email]);
+      rows.push(["Totaalprijs", euro(result.price.totalEuro)]);
+
+      const list = el("dl", { class: "wnt-summary-list" });
+      rows.forEach(([label, value], i) => {
+        const isTotal = label === "Totaalprijs";
+        list.appendChild(el("dt", { class: isTotal ? "wnt-summary-total" : undefined, text: label }));
+        list.appendChild(el("dd", { class: isTotal ? "wnt-summary-total" : undefined, text: value }));
+      });
+      container.appendChild(el("div", { class: "wnt-summary" }, [list]));
+
+      // Geen link naar de taxiID-ritpagina (Hans, 6 oktober 2026): die pagina
+      // heeft een andere URL en opmaak dan onze website en wekt onrust bij
+      // klanten, en annuleren door de klant is niet de bedoeling.
+      container.appendChild(
+        el("p", { class: "wnt-hint", text: "Wilt u iets wijzigen aan uw rit? Neem dan telefonisch contact met ons op." })
+      );
+      // Interne mededeling over de nog niet gekoppelde online betaling hoort
+      // niet bij de klant; de overige waarschuwingen blijven staan.
+      const customerWarnings = (result.warnings || []).filter((w) => !/paymentMeta/i.test(w));
+      customerWarnings.forEach((w) => container.appendChild(el("p", { class: "wnt-hint", text: w })));
       return container;
     }
 

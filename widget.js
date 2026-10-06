@@ -197,6 +197,14 @@
       // invult ("HH:MM") als de opzoeking er geen kon geven.
       flightManualLanding: "",
       flightManualOpen: false,
+      // 6 oktober 2026 (Hans): vastlegging van elke keer dat de ophaaltijd
+      // NIET door de klant zelf in het datumveld is gekozen, maar via een
+      // knop is overgenomen ("Kies dit tijdstip" bij een volle categorie, of
+      // "Ophaaltijd aanpassen aan de landing"). Elke stap: { reason, from,
+      // to } (ISO). Gaat bij het boeken mee zodat de rit bij taxiID een
+      // duidelijke melding krijgt (voorkomt latere discussies). Zodra de
+      // klant daarna zelf het datumveld wijzigt, wordt de lijst leeggemaakt.
+      timeSteps: [],
       note: "",
       priceResult: null,
       priceError: null,
@@ -492,6 +500,32 @@
       }).format(new Date(iso));
     }
 
+    // Neemt een nieuw ophaalmoment over via een knop en legt dat vast.
+    function adoptPickupTime(newDate, reason) {
+      const from = getEffectiveDateTime();
+      state.timeSteps.push({ reason, from: from.toISOString(), to: newDate.toISOString() });
+      state.dateTime = newDate;
+      state.dateTimeTouched = true;
+    }
+
+    // Knop "Ophaaltijd aanpassen aan de landing": alleen als de gekozen
+    // ophaaltijd vóór de landing ligt (Hans, 6 oktober 2026: niet bij een
+    // latere tijd). De ophaaltijd wordt precies de landingstijd.
+    function renderAdjustToLandingButton(landingDate) {
+      if (!(getEffectiveDateTime().getTime() < landingDate.getTime())) return null;
+      return el("button", {
+        type: "button",
+        class: "wnt-button wnt-button-secondary wnt-button-small",
+        text: `Ophaaltijd aanpassen aan de landing (${formatClock(landingDate.toISOString())})`,
+        onclick: () => {
+          adoptPickupTime(landingDate, "flight");
+          render();
+          // De opzoeking geldt per ophaaldatum; die kan hiermee zijn verschoven.
+          if (isAirportPickup() && state.flightNumber.trim()) lookupFlightInfo();
+        },
+      });
+    }
+
     // Landingstijd uit de opzoeking (ISO) of null.
     function lookedUpLandingIso() {
       const info = state.flightInfo;
@@ -563,6 +597,8 @@
             `Let op: uw vlucht landt om ${formatClock(landing.toISOString())}, na uw gekozen ophaaltijd (${formatClock(getEffectiveDateTime().toISOString())}). Pas de ophaaltijd zo nodig aan.`,
           ])
         );
+        const adjustButton = renderAdjustToLandingButton(landing);
+        if (adjustButton) wrapper.appendChild(adjustButton);
       }
       return wrapper;
     }
@@ -608,6 +644,8 @@
             `Let op: deze vlucht landt om ${formatClock(landing, tz)}, na uw gekozen ophaaltijd (${formatClock(getEffectiveDateTime().toISOString(), tz)}). Pas de ophaaltijd zo nodig aan.`,
           ])
         );
+        const adjustButton = renderAdjustToLandingButton(new Date(landing));
+        if (adjustButton) wrapper.appendChild(adjustButton);
       }
       return wrapper;
     }
@@ -727,6 +765,14 @@
       render();
     }
 
+    function currentTimeAdjustments() {
+      const steps = state.timeSteps || [];
+      if (!steps.length) return undefined;
+      const last = steps[steps.length - 1];
+      if (new Date(last.to).getTime() !== getEffectiveDateTime().getTime()) return undefined;
+      return steps.map((step) => ({ reason: step.reason, requestedDateTime: step.from, newDateTime: step.to }));
+    }
+
     async function submitBooking() {
       state.submitting = true;
       state.bookError = null;
@@ -778,6 +824,10 @@
         // gevallen blijft state.flightNumber op zijn standaard lege
         // waarde staan.
         flightNumber: normalizeFlightNumberInput(state.flightNumber) || state.flightNumber.trim() || undefined,
+        // 6 oktober 2026: elke via een knop overgenomen tijdwijziging
+        // (capaciteit/landing), zodat de rit bij taxiID een duidelijke
+        // melding krijgt. Alleen als de laatste stap nog de gekozen tijd is.
+        timeAdjustments: currentTimeAdjustments(),
       };
 
       try {
@@ -1075,6 +1125,7 @@
           onchange: (e) => {
             if (e.target.value) {
               state.dateTime = localInputValueToDate(e.target.value);
+              state.timeSteps = [];
               state.dateTimeTouched = true;
             }
             render();
@@ -1526,8 +1577,7 @@
                   text: "Kies dit tijdstip",
                   disabled: state.submitting,
                   onclick: () => {
-                    state.dateTime = nextAt;
-                    state.dateTimeTouched = true;
+                    adoptPickupTime(nextAt, "capacity");
                     fetchPrice();
                   },
                 })

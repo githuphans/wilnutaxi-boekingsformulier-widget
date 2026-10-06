@@ -1066,6 +1066,39 @@
       container.appendChild(renderAddressField("Bestemming", "destination", updateServiceAreaWarning));
       container.appendChild(serviceAreaWarning);
 
+      const dateWrapper = el("div", { class: "wnt-field" });
+      dateWrapper.appendChild(el("label", { text: "Ophaaldatum en -tijd" }));
+      dateWrapper.appendChild(
+        el("input", {
+          type: "datetime-local",
+          value: toDateTimeLocalValue(getEffectiveDateTime()),
+          onchange: (e) => {
+            if (e.target.value) {
+              state.dateTime = localInputValueToDate(e.target.value);
+              state.dateTimeTouched = true;
+            }
+            render();
+            // Andere ophaaldag: de vluchtopzoeking geldt per datum.
+            if (isAirportPickup() && state.flightNumber.trim()) lookupFlightInfo();
+          },
+        })
+      );
+      dateWrapper.appendChild(
+        el("p", { class: "wnt-hint" }, [
+          "Gekozen moment: ",
+          // Dag+datum/tijd extra opvallend (vet en groter) gemaakt, zodat
+          // het meteen opvalt als het formulier de datum automatisch heeft
+          // doorgezet (Hans, 20 augustus 2026: "zou daar de dag en de datum
+          // vet en groter kunnen worden weergegeven zodat het beter
+          // opvalt").
+          el("strong", { class: "wnt-chosen-moment", text: formatDateTime(getEffectiveDateTime()) }),
+          ". We gaan standaard uit van minimaal 24 uur van tevoren boeken voor de scherpste prijs — pas gerust aan als u eerder wilt vertrekken.",
+        ])
+      );
+      container.appendChild(dateWrapper);
+
+      // 6 oktober 2026 (Hans): het Vluchtnummer-veld staat bewust NA de
+      // datum/tijd-keuze (de opzoeking gebruikt de ophaaldatum).
       // Vluchtnummer (Hans, 2 oktober 2026): verschijnt zodra de
       // OPHAALLOCATIE een luchthaven is (isAirportPickup, zelfde regel als
       // de bagageband-vraag in renderBaggageStep) -- dus alleen bij een
@@ -1103,37 +1136,6 @@
         if (manualLandingNode) flightWrapper.appendChild(manualLandingNode);
         container.appendChild(flightWrapper);
       }
-
-      const dateWrapper = el("div", { class: "wnt-field" });
-      dateWrapper.appendChild(el("label", { text: "Ophaaldatum en -tijd" }));
-      dateWrapper.appendChild(
-        el("input", {
-          type: "datetime-local",
-          value: toDateTimeLocalValue(getEffectiveDateTime()),
-          onchange: (e) => {
-            if (e.target.value) {
-              state.dateTime = localInputValueToDate(e.target.value);
-              state.dateTimeTouched = true;
-            }
-            render();
-            // Andere ophaaldag: de vluchtopzoeking geldt per datum.
-            if (isAirportPickup() && state.flightNumber.trim()) lookupFlightInfo();
-          },
-        })
-      );
-      dateWrapper.appendChild(
-        el("p", { class: "wnt-hint" }, [
-          "Gekozen moment: ",
-          // Dag+datum/tijd extra opvallend (vet en groter) gemaakt, zodat
-          // het meteen opvalt als het formulier de datum automatisch heeft
-          // doorgezet (Hans, 20 augustus 2026: "zou daar de dag en de datum
-          // vet en groter kunnen worden weergegeven zodat het beter
-          // opvalt").
-          el("strong", { class: "wnt-chosen-moment", text: formatDateTime(getEffectiveDateTime()) }),
-          ". We gaan standaard uit van minimaal 24 uur van tevoren boeken voor de scherpste prijs — pas gerust aan als u eerder wilt vertrekken.",
-        ])
-      );
-      container.appendChild(dateWrapper);
 
       const passengersRow = el("div", { class: "wnt-row" });
       passengersRow.appendChild(renderStepperField("Aantal volwassenen", state.passengerCount, 1, 8, (v) => (state.passengerCount = v)));

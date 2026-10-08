@@ -44,9 +44,15 @@
  * src/maps/resolveAddress.js in de backend. `guessZoneFromAddress` bestaat
  * nog, puur als stille terugval zodra die aanroep een keer niet lukt.
  *
+ * Online betalen (8 oktober 2026): staat dat in de backend aan (/api/config
+ * -> onlinePayment.enabled), dan stuurt "Bevestig en betaal" de klant naar de
+ * MultiSafepay-betaalpagina en komt de klant terug op dezelfde pagina met
+ * ?wnt_order=...; de widget toont dan de status (GET /api/booking-status) en
+ * daarna de bevestiging. Staat het uit, dan gaat de rit direct naar taxiID.
+ *
  * Wat bewust nog NIET (goed) zit — zie widget/README.md voor de volledige
- * lijst: online betalen, en huisstijl-afstemming met de echte
- * Elementor-pagina (nu een neutrale eigen stijl via CSS-variabelen).
+ * lijst: huisstijl-afstemming met de echte Elementor-pagina (nu een neutrale
+ * eigen stijl via CSS-variabelen).
  */
 (function () {
   "use strict";
@@ -213,6 +219,8 @@
       bookResult: null,
       bookError: null,
       submitting: false,
+      // Terugkeer van de betaalpagina (online betalen), zie startPaymentReturn.
+      payment: null,
     };
 
     function findPoiById(id) {
@@ -785,6 +793,63 @@
       return steps.map((step) => ({ reason: step.reason, requestedDateTime: step.from, newDateTime: step.to }));
     }
 
+    // ---- Online betalen: terugkeer van de betaalpagina (8 oktober 2026) ----
+
+    // Het adres van deze pagina zonder onze eigen terugkeer-parameters; hier
+    // stuurt MultiSafepay de klant na het betalen naartoe.
+    function currentReturnUrl() {
+      const url = new URL(window.location.href);
+      url.hash = "";
+      url.searchParams.delete("wnt_order");
+      url.searchParams.delete("wnt_cancelled");
+      return url.toString();
+    }
+
+    function getReturnOrderId() {
+      try {
+        const id = new URLSearchParams(window.location.search).get("wnt_order");
+        return /^WNT[0-9a-f]{32}$/.test(id || "") ? id : null;
+      } catch (err) {
+        return null;
+      }
+    }
+
+    function startPaymentReturn(orderId) {
+      let cancelled = false;
+      try {
+        cancelled = new URLSearchParams(window.location.search).get("wnt_cancelled") === "1";
+      } catch (err) {
+        /* negeren */
+      }
+      state.step = "payment";
+      state.payment = { orderId, view: null, error: null, cancelled, gaveUp: false, startedAt: Date.now() };
+      render();
+      pollPaymentStatus();
+    }
+
+    async function pollPaymentStatus() {
+      const p = state.payment;
+      try {
+        const response = await fetch(`${apiBase}/api/booking-status?order=${encodeURIComponent(p.orderId)}`, { cache: "no-store" });
+        if (response.status === 404) {
+          p.view = { status: "unknown" };
+          p.error = null;
+          render();
+          return;
+        }
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        p.view = await response.json();
+        p.error = null;
+      } catch (err) {
+        p.error = "Kon de status van uw betaling niet ophalen. We proberen het opnieuw…";
+      }
+      const status = p.view && p.view.status;
+      const keepPolling = !p.view || status === "awaiting_payment" || status === "processing";
+      if (keepPolling && Date.now() - p.startedAt >= 15 * 60 * 1000) p.gaveUp = true;
+      render();
+      if (keepPolling && !p.gaveUp) setTimeout(pollPaymentStatus, 2500);
+    }
+
     async function submitBooking() {
       state.submitting = true;
       state.bookError = null;
@@ -840,6 +905,11 @@
         // (capaciteit/landing), zodat de rit bij taxiID een duidelijke
         // melding krijgt. Alleen als de laatste stap nog de gekozen tijd is.
         timeAdjustments: currentTimeAdjustments(),
+        // 8 oktober 2026 (online betalen): alleen wat de klant zelf als
+        // opmerking typte, voor het bevestigingsscherm; en de pagina waar
+        // de klant na het betalen naartoe teruggestuurd wordt.
+        customerNote: state.note || undefined,
+        returnUrl: currentReturnUrl(),
       };
 
       try {
@@ -851,6 +921,14 @@
         const data = await response.json();
         if (!response.ok) {
           state.bookError = data.details ? `${data.error}: ${JSON.stringify(data.details)}` : data.error || `HTTP ${response.status}`;
+        } else if (data.requiresPayment && data.paymentUrl) {
+          // Online betalen: de rit wordt pas aangemaakt nadat de betaling
+          // bevestigd is. De klant gaat naar de betaalpagina van
+          // MultiSafepay en komt daarna terug op deze pagina (?wnt_order=...).
+          state.step = "redirecting";
+          render();
+          window.location.href = data.paymentUrl;
+          return;
         } else {
           state.bookResult = data;
           state.step = "success";
@@ -1688,6 +1766,25 @@
         container.appendChild(el("p", { class: "wnt-error" }, [String(state.bookError)]));
       }
 
+      // Online betalen (8 oktober 2026): staat dat aan, dan betaalt de klant
+      // eerst en wordt de rit pas daarna vastgelegd. Een korte uitleg vooraf,
+      // zodat de doorverwijzing naar de betaalpagina geen verrassing is.
+      const onlinePayment = state.config.onlinePayment || {};
+      const selectedVehicle =
+        state.priceResult && (state.priceResult.vehicles || []).find((v) => v.vehicleId === state.selectedVehicleId);
+      const totalToPay = selectedVehicle && selectedVehicle.price ? selectedVehicle.price.totalEuro : null;
+      if (onlinePayment.enabled) {
+        const onlyIdeal = totalToPay !== null && totalToPay <= (onlinePayment.lowAmountThresholdEuro || 0);
+        container.appendChild(
+          el("p", {
+            class: "wnt-hint",
+            text: onlyIdeal
+              ? "U betaalt direct online met iDEAL | Wero. Na het bevestigen gaat u naar de beveiligde betaalpagina; uw rit wordt vastgelegd zodra de betaling is gelukt."
+              : "U betaalt direct online. Na het bevestigen gaat u naar de beveiligde betaalpagina, waar u uw betaalmethode kiest; uw rit wordt vastgelegd zodra de betaling is gelukt.",
+          })
+        );
+      }
+
       const buttonRow = el("div", { class: "wnt-row" });
       buttonRow.appendChild(
         el("button", {
@@ -1704,7 +1801,13 @@
         el("button", {
           type: "button",
           class: "wnt-button wnt-button-primary",
-          text: state.submitting ? "Bezig…" : "Bevestig boeking",
+          text: state.submitting
+            ? "Bezig…"
+            : onlinePayment.enabled
+              ? totalToPay !== null
+                ? `Bevestig en betaal ${euro(totalToPay)}`
+                : "Bevestig en betaal"
+              : "Bevestig boeking",
           disabled: state.submitting ? "" : undefined,
           onclick: () => {
             const p = state.passenger;
@@ -1750,38 +1853,63 @@
       return parts.length ? parts.join(", ") : "Geen bagage";
     }
 
-    function renderSuccessStep() {
-      const container = el("div", { class: "wnt-step wnt-success" });
-      const result = state.bookResult;
+    // Samenvatting uit wat de klant zojuist invulde: alleen nog als terugval
+    // voor het geval de backend (nog) geen `summary` meestuurt. Normaal komt
+    // de samenvatting van de server (zie backend prepareBooking.js), zodat
+    // hetzelfde scherm ook na een terugkeer van de betaalpagina te tonen is.
+    function buildSummaryFromState(result) {
       const p = state.passenger;
+      const vehicle = state.priceResult && (state.priceResult.vehicles || []).find((v) => v.vehicleId === state.selectedVehicleId);
+      return {
+        originAddress: state.origin.text,
+        destinationAddress: state.destination.text,
+        dateTime: getEffectiveDateTime().toISOString(),
+        flightNumber:
+          isAirportPickup() && state.flightNumber.trim()
+            ? normalizeFlightNumberInput(state.flightNumber) || state.flightNumber.trim()
+            : null,
+        passengerCount: totalPassengerCount(),
+        vehicleName: vehicle ? vehicle.name : null,
+        vehicleModel: vehicle ? vehicle.model : null,
+        baggage: describeBaggageForSummary(),
+        note: state.note || null,
+        name: `${p.firstName} ${p.lastName}`.trim(),
+        phoneNumber: p.phoneNumber,
+        email: p.email,
+        totalEuro: result.price.totalEuro,
+      };
+    }
+
+    function renderSummaryView({ summary, reference, warnings, paid }) {
+      const container = el("div", { class: "wnt-step wnt-success" });
+      const firstName = (summary.name || "").split(" ")[0];
       container.appendChild(el("h2", { text: "Uw rit is geboekt" }));
       container.appendChild(
         el("p", {
-          text: `Bedankt${p.firstName ? ", " + p.firstName : ""}! Uw boeking is bevestigd. Hieronder vindt u de gegevens van uw rit.`,
+          text: paid
+            ? `Bedankt${firstName ? ", " + firstName : ""}! Uw betaling is ontvangen en uw boeking is bevestigd. Hieronder vindt u de gegevens van uw rit.`
+            : `Bedankt${firstName ? ", " + firstName : ""}! Uw boeking is bevestigd. Hieronder vindt u de gegevens van uw rit.`,
         })
       );
 
-      const vehicle = state.priceResult && (state.priceResult.vehicles || []).find((v) => v.vehicleId === state.selectedVehicleId);
       const rows = [];
-      if (result.reference) rows.push(["Referentie", result.reference]);
-      rows.push(["Ophalen", state.origin.text]);
-      rows.push(["Bestemming", state.destination.text]);
-      rows.push(["Datum en tijd", formatLongDateTime(getEffectiveDateTime())]);
-      if (isAirportPickup() && state.flightNumber.trim()) {
-        rows.push(["Vluchtnummer", normalizeFlightNumberInput(state.flightNumber) || state.flightNumber.trim()]);
-      }
-      rows.push(["Passagiers", String(totalPassengerCount())]);
-      if (vehicle) rows.push(["Voertuig", [vehicle.name, vehicle.model].filter(Boolean).join(" - ")]);
-      rows.push(["Bagage", describeBaggageForSummary()]);
-      if (state.note) rows.push(["Opmerking", state.note]);
-      rows.push(["Naam", `${p.firstName} ${p.lastName}`.trim()]);
-      rows.push(["Telefoonnummer", p.phoneNumber]);
-      rows.push(["E-mailadres", p.email]);
-      rows.push(["Totaalprijs", euro(result.price.totalEuro)]);
+      if (reference) rows.push(["Referentie", reference]);
+      rows.push(["Ophalen", summary.originAddress]);
+      rows.push(["Bestemming", summary.destinationAddress]);
+      rows.push(["Datum en tijd", formatLongDateTime(new Date(summary.dateTime))]);
+      if (summary.flightNumber) rows.push(["Vluchtnummer", summary.flightNumber]);
+      rows.push(["Passagiers", String(summary.passengerCount)]);
+      if (summary.vehicleName) rows.push(["Voertuig", [summary.vehicleName, summary.vehicleModel].filter(Boolean).join(" - ")]);
+      rows.push(["Bagage", summary.baggage]);
+      if (summary.note) rows.push(["Opmerking", summary.note]);
+      rows.push(["Naam", summary.name]);
+      rows.push(["Telefoonnummer", summary.phoneNumber]);
+      rows.push(["E-mailadres", summary.email]);
+      rows.push([paid ? "Betaald" : "Totaalprijs", euro(summary.totalEuro)]);
 
       const list = el("dl", { class: "wnt-summary-list" });
-      rows.forEach(([label, value], i) => {
-        const isTotal = label === "Totaalprijs";
+      rows.forEach(([label, value]) => {
+        const isTotal = label === "Totaalprijs" || label === "Betaald";
         list.appendChild(el("dt", { class: isTotal ? "wnt-summary-total" : undefined, text: label }));
         list.appendChild(el("dd", { class: isTotal ? "wnt-summary-total" : undefined, text: value }));
       });
@@ -1795,8 +1923,140 @@
       );
       // Interne mededeling over de nog niet gekoppelde online betaling hoort
       // niet bij de klant; de overige waarschuwingen blijven staan.
-      const customerWarnings = (result.warnings || []).filter((w) => !/paymentMeta/i.test(w));
-      customerWarnings.forEach((w) => container.appendChild(el("p", { class: "wnt-hint", text: w })));
+      (warnings || [])
+        .filter((w) => !/paymentMeta/i.test(w))
+        .forEach((w) => container.appendChild(el("p", { class: "wnt-hint", text: w })));
+      return container;
+    }
+
+    function renderSuccessStep() {
+      const result = state.bookResult;
+      return renderSummaryView({
+        summary: result.summary || buildSummaryFromState(result),
+        reference: result.reference,
+        warnings: result.warnings,
+        paid: false,
+      });
+    }
+
+    // Tussenscherm terwijl de browser naar de betaalpagina gaat.
+    function renderRedirectStep() {
+      const container = el("div", { class: "wnt-step" });
+      container.appendChild(el("h2", { text: "Even geduld…" }));
+      container.appendChild(el("p", { text: "U wordt doorgestuurd naar de beveiligde betaalpagina." }));
+      return container;
+    }
+
+    // Scherm na terugkeer van de betaalpagina (?wnt_order=...): wacht op de
+    // bevestiging van de betaling en toont daarna de bevestiging, of een
+    // duidelijke uitleg als het niet gelukt is.
+    function renderPaymentStep() {
+      const p = state.payment;
+      const view = p.view;
+      const status = view && view.status;
+      const container = el("div", { class: "wnt-step" });
+      const newBooking = () => {
+        window.location.href = currentReturnUrl();
+      };
+      const phoneHint = "Neem telefonisch contact met ons op als u vragen heeft.";
+
+      if (status === "completed") {
+        return renderSummaryView({ summary: view.summary, reference: view.reference, warnings: view.warnings, paid: true });
+      }
+
+      if (status === "payment_failed") {
+        container.appendChild(el("h2", { text: "Betaling niet gelukt" }));
+        container.appendChild(
+          el("p", {
+            text:
+              view.reason === "expired"
+                ? "De betaallink is verlopen. Er is niets afgeschreven en er is geen rit geboekt."
+                : "De betaling is geannuleerd of niet gelukt. Er is niets afgeschreven en er is geen rit geboekt.",
+          })
+        );
+        container.appendChild(
+          el("button", { type: "button", class: "wnt-button wnt-button-primary", text: "Opnieuw boeken", onclick: newBooking })
+        );
+        return container;
+      }
+
+      if (status === "refunded") {
+        container.appendChild(el("h2", { text: "Uw betaling is teruggestort" }));
+        container.appendChild(
+          el("p", {
+            text: "Uw betaling is gelukt, maar het gekozen voertuig bleek op dit tijdstip net niet meer beschikbaar. Er is geen rit geboekt en uw bedrag wordt teruggestort; dat kan een paar werkdagen duren.",
+          })
+        );
+        container.appendChild(el("p", { class: "wnt-hint", text: `U kunt een ander tijdstip proberen. ${phoneHint}` }));
+        container.appendChild(
+          el("button", { type: "button", class: "wnt-button wnt-button-primary", text: "Opnieuw boeken", onclick: newBooking })
+        );
+        return container;
+      }
+
+      if (status === "needs_attention") {
+        container.appendChild(el("h2", { text: "Uw betaling is ontvangen" }));
+        container.appendChild(
+          el("p", {
+            text: "Uw betaling is gelukt, maar het vastleggen van uw rit vraagt om een handmatige controle. Wij nemen zo snel mogelijk contact met u op. Wilt u zekerheid, bel ons dan.",
+          })
+        );
+        return container;
+      }
+
+      if (status === "unknown") {
+        container.appendChild(el("h2", { text: "Boeking niet gevonden" }));
+        container.appendChild(
+          el("p", { text: `We kunnen deze boeking niet meer vinden (de link is mogelijk te oud). ${phoneHint}` })
+        );
+        container.appendChild(
+          el("button", { type: "button", class: "wnt-button wnt-button-primary", text: "Nieuwe boeking", onclick: newBooking })
+        );
+        return container;
+      }
+
+      // Nog onderweg: nog niet betaald (of de bevestiging moet nog komen), of de rit wordt vastgelegd.
+      if (status === "awaiting_payment" && p.cancelled) {
+        container.appendChild(el("h2", { text: "Betaling niet voltooid" }));
+        container.appendChild(
+          el("p", { text: "Er is niets afgeschreven en er is nog geen rit geboekt. U kunt de betaling opnieuw proberen." })
+        );
+        const row = el("div", { class: "wnt-row" });
+        if (view.paymentUrl) {
+          row.appendChild(
+            el("button", {
+              type: "button",
+              class: "wnt-button wnt-button-primary",
+              text: "Opnieuw betalen",
+              onclick: () => {
+                window.location.href = view.paymentUrl;
+              },
+            })
+          );
+        }
+        row.appendChild(el("button", { type: "button", class: "wnt-button wnt-button-secondary", text: "Nieuwe boeking", onclick: newBooking }));
+        container.appendChild(row);
+        return container;
+      }
+
+      container.appendChild(el("h2", { text: status === "processing" ? "Uw rit wordt vastgelegd…" : "Uw betaling wordt gecontroleerd…" }));
+      container.appendChild(
+        el("p", {
+          text:
+            status === "processing"
+              ? "Uw betaling is ontvangen. We leggen nu uw rit vast; dit duurt een paar seconden. Sluit deze pagina nog niet."
+              : "We controleren of uw betaling is gelukt. Dit duurt meestal een paar seconden. Sluit deze pagina nog niet.",
+        })
+      );
+      if (p.error) container.appendChild(el("p", { class: "wnt-hint", text: p.error }));
+      if (p.gaveUp) {
+        container.appendChild(
+          el("p", {
+            class: "wnt-error",
+            text: `Het duurt langer dan verwacht. Heeft u betaald, dan wordt uw rit nog verwerkt en ontvangt u een bevestiging per e-mail en sms. ${phoneHint}`,
+          })
+        );
+      }
       return container;
     }
 
@@ -1817,10 +2077,20 @@
 
       const steps = ["ride", "baggage", "vehicles", "details", "success"];
       const stepLabels = ["Rit", "Bagage", "Voertuig", "Gegevens", "Klaar"];
+      // Tijdens het betalen staat de klant in "Gegevens"; pas als de betaling
+      // is bevestigd en de rit vastligt, is het "Klaar".
+      const activeStep =
+        state.step === "payment"
+          ? state.payment && state.payment.view && state.payment.view.status === "completed"
+            ? "success"
+            : "details"
+          : state.step === "redirecting"
+            ? "details"
+            : state.step;
       const progress = el("div", { class: "wnt-progress" });
       steps.forEach((s, i) => {
         progress.appendChild(
-          el("span", { class: "wnt-progress-step" + (state.step === s ? " wnt-progress-step-active" : "") }, [
+          el("span", { class: "wnt-progress-step" + (activeStep === s ? " wnt-progress-step-active" : "") }, [
             `${i + 1}. ${stepLabels[i]}`,
           ])
         );
@@ -1832,11 +2102,30 @@
       else if (state.step === "vehicles") wrapper.appendChild(renderVehiclesStep());
       else if (state.step === "details") wrapper.appendChild(renderDetailsStep());
       else if (state.step === "success") wrapper.appendChild(renderSuccessStep());
+      else if (state.step === "redirecting") wrapper.appendChild(renderRedirectStep());
+      else if (state.step === "payment") wrapper.appendChild(renderPaymentStep());
 
       root.appendChild(wrapper);
     }
 
-    fetchConfig();
+    // Terug van de betaalpagina met de browser-terugknop: het formulier
+    // staat dan (via de back/forward-cache) nog "Bezig…" -- weer bruikbaar maken.
+    window.addEventListener("pageshow", (event) => {
+      if (event.persisted && (state.step === "redirecting" || state.submitting)) {
+        state.step = "details";
+        state.submitting = false;
+        render();
+      }
+    });
+
+    // Terugkeer van de betaalpagina (?wnt_order=...): direct de status tonen,
+    // het formulier zelf is dan niet meer nodig.
+    const returnOrderId = getReturnOrderId();
+    if (returnOrderId) {
+      startPaymentReturn(returnOrderId);
+    } else {
+      fetchConfig();
+    }
   }
 
   function init() {

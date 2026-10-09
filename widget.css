@@ -114,6 +114,13 @@
   color: var(--wnt-text-muted);
 }
 
+.wnt-dimensions {
+  font-size: 0.85em;
+  font-weight: 400;
+  color: var(--wnt-text-muted);
+  white-space: nowrap;
+}
+
 .wnt-chosen-moment {
   font-size: 1.15em;
   font-weight: 700;

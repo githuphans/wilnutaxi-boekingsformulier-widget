@@ -1159,6 +1159,22 @@
       return wrapper;
     }
 
+    // 9 oktober 2026 (Hans): vluchtnummer, landingstijd en de "bagageband"-
+    // keuze horen alleen bij een ophaalrit vanaf een luchthaven. Wijzigt de
+    // klant het ophaaladres naar iets anders, dan wissen we ze, zodat ze niet
+    // blijven staan en bij een latere luchthaven-keuze ineens ongemerkt weer
+    // terugkomen. Wordt aan het begin van elke render() aangeroepen: de
+    // overgang luchthaven <-> geen luchthaven triggert altijd een render()
+    // (zie renderAddressField), dus dit loopt nooit achter.
+    function resetAirportOnlyState() {
+      if (isAirportPickup()) return;
+      state.flightNumber = "";
+      state.flightInfo = null;
+      state.flightManualLanding = "";
+      state.flightManualOpen = false;
+      state.airportBaggageAnswer = null;
+    }
+
     // Zet bagage-gerelateerde state terug naar de neutrale standaardwaarde
     // ("geen bagage") -- gebruikt zodra de klant op stap 1 alsnog "Nee"
     // kiest bij "Heeft u bagage die mee moet?", zodat eerder op stap 2
@@ -1407,9 +1423,18 @@
       return container;
     }
 
-    function renderStepperField(labelText, value, min, max, onChange) {
+    // "ca. 85 × 55 × 35 cm" of null als er geen (volledige) afmetingen zijn.
+    function dimensionsLabel(type) {
+      const d = type && type.dimensionsCm;
+      if (!d || !(d.l > 0) || !(d.w > 0) || !(d.h > 0)) return null;
+      return `ca. ${d.l} × ${d.w} × ${d.h} cm`;
+    }
+
+    function renderStepperField(labelText, value, min, max, onChange, extraText) {
       const wrapper = el("div", { class: "wnt-field wnt-stepper" });
-      wrapper.appendChild(el("label", { text: labelText }));
+      wrapper.appendChild(
+        el("label", {}, extraText ? [labelText, " ", el("span", { class: "wnt-dimensions", text: `(${extraText})` })] : [labelText])
+      );
       const valueLabel = el("span", { class: "wnt-stepper-value", text: String(value) });
       wrapper.appendChild(
         el("div", { class: "wnt-stepper-controls" }, [
@@ -1444,17 +1469,30 @@
     function renderBaggageStep() {
       const container = el("div", { class: "wnt-step" });
       container.appendChild(el("h2", { text: "Bagage" }));
+      // 9 oktober 2026 (Hans): afmetingen (l x b x h in cm) bij het bagagetype,
+      // zodat de klant weet welke koffermaat erbij hoort. Alleen als ze in
+      // /admin zijn ingevuld (bv. niet bij een rug-/handtas).
+      const types = state.config.baggageTypes || [];
+      const showDimensions = types.some((t) => dimensionsLabel(t));
       container.appendChild(
         el("p", { class: "wnt-hint" }, [
-          "Zo weten we zeker dat we met een voertuig komen waar alle bagage in past.",
+          "Zo weten we zeker dat we met een voertuig komen waar alle bagage in past." +
+            (showDimensions ? " Afmetingen zijn lengte × breedte × hoogte, bij benadering." : ""),
         ])
       );
 
-      (state.config.baggageTypes || []).forEach((type) => {
+      types.forEach((type) => {
         container.appendChild(
-          renderStepperField(type.name, state.baggageCounts[type.id] || 0, 0, 10, (v) => {
-            state.baggageCounts[type.id] = v;
-          })
+          renderStepperField(
+            type.name,
+            state.baggageCounts[type.id] || 0,
+            0,
+            10,
+            (v) => {
+              state.baggageCounts[type.id] = v;
+            },
+            dimensionsLabel(type)
+          )
         );
       });
 
@@ -2061,6 +2099,7 @@
     }
 
     function render() {
+      resetAirportOnlyState();
       root.innerHTML = "";
       const wrapper = el("div", { class: "wnt-widget" });
 

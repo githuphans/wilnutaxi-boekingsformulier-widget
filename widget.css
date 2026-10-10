@@ -514,3 +514,48 @@
     margin-bottom: 0.6rem;
   }
 }
+
+/* 10 oktober 2026: compacte "Gekozen moment"-regel met ⓘ-knop (stap 1) */
+.wnt-info-button {
+  display: inline-block;
+  margin: 0;
+  padding: 0 0.25em;
+  border: 0;
+  background: none;
+  color: var(--wnt-accent, inherit);
+  font: inherit;
+  font-size: 1.1em;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: baseline;
+}
+
+.wnt-info-button:hover,
+.wnt-info-button:focus-visible {
+  text-decoration: underline;
+}
+
+.wnt-info-text {
+  margin-top: 0.25rem;
+}
+
+/* Wat meer lucht tussen de datum-regel en "Aantal volwassenen" */
+.wnt-passengers-row {
+  margin-top: 0.75rem;
+}
+
+/* Verwachte aankomsttijd (ritkeuze): de vrijwaring is altijd zichtbaar */
+.wnt-arrival {
+  margin: 0.35rem 0 0.75rem;
+}
+
+.wnt-arrival-line {
+  margin: 0;
+  font-size: 0.95em;
+}
+
+.wnt-arrival-disclaimer {
+  margin: 0.15rem 0 0;
+  font-size: 0.8em;
+  color: var(--wnt-text-muted);
+}

@@ -175,6 +175,8 @@
       // "binnen 24 uur"-waarschuwing tot gevolg bij het boeken.
       dateTime: null,
       dateTimeTouched: false,
+      // ⓘ bij "Gekozen moment" uitgeklapt? (stap 1)
+      dateInfoOpen: false,
       passengerCount: 1,
       childCount: 0,
       // hasBaggage: gevraagd op het eerste scherm (Hans, 19 augustus 2026,
@@ -1240,8 +1242,11 @@
           },
         })
       );
+      // 10 oktober 2026 (Hans, om ruimte te besparen): compacte regel met een
+      // ⓘ-knop die de uitleg over de 24 uur inline openklapt (geen pop-up:
+      // werkt ook in een iframe/mobiel zonder extra "ok"-knop).
       dateWrapper.appendChild(
-        el("p", { class: "wnt-hint" }, [
+        el("p", { class: "wnt-hint wnt-moment-line" }, [
           "Gekozen moment: ",
           // Dag+datum/tijd extra opvallend (vet en groter) gemaakt, zodat
           // het meteen opvalt als het formulier de datum automatisch heeft
@@ -1249,9 +1254,28 @@
           // vet en groter kunnen worden weergegeven zodat het beter
           // opvalt").
           el("strong", { class: "wnt-chosen-moment", text: formatDateTime(getEffectiveDateTime()) }),
-          ". We gaan standaard uit van minimaal 24 uur van tevoren boeken voor de scherpste prijs — pas gerust aan als u eerder wilt vertrekken.",
+          " ",
+          el("button", {
+            type: "button",
+            class: "wnt-info-button",
+            text: "ⓘ",
+            title: "Uitleg over het gekozen moment",
+            "aria-label": "Uitleg over het gekozen moment",
+            "aria-expanded": state.dateInfoOpen ? "true" : "false",
+            onclick: () => {
+              state.dateInfoOpen = !state.dateInfoOpen;
+              render();
+            },
+          }),
         ])
       );
+      if (state.dateInfoOpen) {
+        dateWrapper.appendChild(
+          el("p", { class: "wnt-hint wnt-info-text" }, [
+            "We gaan standaard uit van minimaal 24 uur van tevoren boeken voor de scherpste prijs — pas gerust aan als u eerder wilt vertrekken.",
+          ])
+        );
+      }
       container.appendChild(dateWrapper);
 
       // 6 oktober 2026 (Hans): het Vluchtnummer-veld staat bewust NA de
@@ -1294,7 +1318,7 @@
         container.appendChild(flightWrapper);
       }
 
-      const passengersRow = el("div", { class: "wnt-row" });
+      const passengersRow = el("div", { class: "wnt-row wnt-passengers-row" });
       passengersRow.appendChild(renderStepperField("Aantal volwassenen", state.passengerCount, 1, 8, (v) => (state.passengerCount = v)));
       passengersRow.appendChild(renderStepperField("Aantal kinderen", state.childCount, 0, 8, (v) => (state.childCount = v)));
       container.appendChild(passengersRow);
@@ -1621,6 +1645,26 @@
       return el("div", { class: "wnt-vehicle-image wnt-vehicle-icon", html: GENERIC_VEHICLE_ICON_SVG });
     }
 
+    // 10 oktober 2026 (Hans' testpanel-idee): verwachte aankomsttijd met de
+    // gebruikelijke drukte op het gekozen ophaalmoment. Alleen informatie --
+    // de prijs verandert er niet door. Omdat een klant hieraan verwachtingen
+    // kan ontlenen staat de vrijwaring bewust ALTIJD zichtbaar direct onder
+    // de tijd (niet achter een ⓘ), en wordt er één "ca."-tijdstip getoond.
+    function renderEstimatedArrival(iso) {
+      if (!iso || Number.isNaN(new Date(iso).getTime())) return null;
+      const pickup = getEffectiveDateTime().toISOString();
+      const sameDay =
+        new Intl.DateTimeFormat("nl-NL", { dateStyle: "short", timeZone: "Europe/Amsterdam" }).format(new Date(pickup)) ===
+          new Intl.DateTimeFormat("nl-NL", { dateStyle: "short", timeZone: "Europe/Amsterdam" }).format(new Date(iso));
+      const when = sameDay ? formatClock(iso) : formatDayAndClock(iso);
+      return el("div", { class: "wnt-arrival" }, [
+        el("p", { class: "wnt-arrival-line" }, ["Verwachte aankomst: ", el("strong", { text: `ca. ${when}` })]),
+        el("p", { class: "wnt-arrival-disclaimer" }, [
+          "Dit is een schatting op basis van de gebruikelijke drukte op het gekozen tijdstip. De werkelijke aankomsttijd kan afwijken, bijvoorbeeld door files, weer of wegwerkzaamheden. Aan deze schatting kunnen geen rechten worden ontleend. De prijs blijft ongewijzigd.",
+        ]),
+      ]);
+    }
+
     function renderVehiclesStep() {
       const container = el("div", { class: "wnt-step" });
       container.appendChild(el("h2", { text: "Kies uw voertuig" }));
@@ -1633,6 +1677,8 @@
             )} min.`,
           ])
         );
+        const arrivalNode = renderEstimatedArrival(state.priceResult.route.estimatedArrival);
+        if (arrivalNode) container.appendChild(arrivalNode);
       }
 
       // 2 september 2026 (Hans: "volgens mij werkt het berekenen van de

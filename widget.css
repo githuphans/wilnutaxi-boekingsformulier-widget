@@ -567,3 +567,8 @@
   font-size: 0.8em;
   color: var(--wnt-text-muted);
 }
+
+/* "Nog een rit boeken" onder de bevestiging (10 oktober 2026) */
+.wnt-new-booking {
+  margin-top: 1rem;
+}

@@ -2025,6 +2025,22 @@
       (warnings || [])
         .filter((w) => !/paymentMeta/i.test(w))
         .forEach((w) => container.appendChild(el("p", { class: "wnt-hint", text: w })));
+
+      // 10 oktober 2026 (Hans): vanaf de bevestiging was er geen duidelijke
+      // weg terug naar het beginscherm voor een volgende rit. De pagina wordt
+      // opnieuw geladen op het adres zonder onze terugkeer-parameters
+      // (?wnt_order=...), zodat het formulier helemaal schoon begint en de
+      // pagina bovenaan staat.
+      container.appendChild(
+        el("button", {
+          type: "button",
+          class: "wnt-button wnt-button-primary wnt-new-booking",
+          text: "Nog een rit boeken",
+          onclick: () => {
+            window.location.href = currentReturnUrl();
+          },
+        })
+      );
       return container;
     }
 

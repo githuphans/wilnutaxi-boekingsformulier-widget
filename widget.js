@@ -1665,6 +1665,15 @@
       ]);
     }
 
+    function renderAppliedSurcharges(price) {
+      const applied = ((price && price.appliedSurcharges) || []).filter(
+        (item) => item && item.name && Number.isFinite(item.amountEuro) && item.amountEuro > 0
+      );
+      if (!applied.length) return null;
+      const parts = applied.map((item) => `${item.name} (+${euro(item.amountEuro)})`);
+      return el("p", { class: "wnt-vehicle-surcharges", text: `Inclusief ${applied.length === 1 ? "toeslag" : "toeslagen"}: ${parts.join(", ")}` });
+    }
+
     function renderVehiclesStep() {
       const container = el("div", { class: "wnt-step" });
       container.appendChild(el("h2", { text: "Kies uw voertuig" }));
@@ -1714,6 +1723,12 @@
         card.appendChild(el("p", { class: "wnt-vehicle-model", text: vehicle.model }));
         if (vehicle.price) {
           card.appendChild(el("p", { class: "wnt-vehicle-price", text: euro(vehicle.price.totalEuro) }));
+          // 10 oktober 2026 (Hans): laat zien waarom de prijs hoger is dan
+          // normaal -- alle toegepaste toeslagen (spits, nacht, weekend,
+          // feestdag, bijzondere bagage, boeking binnen 24 uur) met naam en
+          // bedrag. De naam is de naam uit /admin; de notitie daar is intern.
+          const surchargeNode = renderAppliedSurcharges(vehicle.price);
+          if (surchargeNode) card.appendChild(surchargeNode);
         }
         if (!vehicle.available) {
           // 30 september 2026: de capaciteitscheck (vehicle.capacity.full,

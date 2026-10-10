@@ -393,6 +393,14 @@
   text-align: center;
 }
 
+/* Toegepaste toeslagen onder de prijs (10 oktober 2026) */
+.wnt-vehicle-surcharges {
+  margin: -0.25rem 0 0.6rem;
+  font-size: 0.8em;
+  color: var(--wnt-text-muted);
+  text-align: center;
+}
+
 .wnt-vehicle-unavailable {
   opacity: 0.5;
 }

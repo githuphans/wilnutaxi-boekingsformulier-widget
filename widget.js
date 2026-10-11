@@ -61,6 +61,12 @@
     return new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(amount);
   }
 
+  // "K7M3QX9P" -> "K7M3-QX9P" (alleen om te tonen)
+  function formatDiscountCode(code) {
+    const c = String(code || "").toUpperCase();
+    return c.length === 8 ? `${c.slice(0, 4)}-${c.slice(4)}` : c;
+  }
+
   function formatDateTime(date) {
     return new Intl.DateTimeFormat("nl-NL", {
       weekday: "long",
@@ -217,6 +223,15 @@
       priceResult: null,
       priceError: null,
       selectedVehicleId: null,
+      // 11 oktober 2026: persoonlijke kortingscode (zie renderDiscountBox).
+      // `discountInput` is wat de klant typt, `discountCode` de code die met
+      // de prijsaanvraag meegaat (pas na "Toepassen"), `discountApplied` het
+      // door de server bevestigde antwoord { code, kind, value }.
+      discountInput: "",
+      discountCode: "",
+      discountOpen: false,
+      discountApplied: null,
+      discountError: null,
       passenger: { firstName: "", lastName: "", email: "", phoneNumber: "" },
       bookResult: null,
       bookError: null,
@@ -740,6 +755,7 @@
     }
 
     async function fetchPrice() {
+      const sentDiscountCode = state.discountCode;
       state.submitting = true;
       state.priceError = null;
       render();
@@ -762,6 +778,7 @@
         destinationZone: resolveZone(state.destination) || undefined,
         originAddress: state.origin.text,
         destinationAddress: state.destination.text,
+        discountCode: sentDiscountCode || undefined,
       };
 
       try {
@@ -778,6 +795,18 @@
         } else {
           state.priceResult = data;
           state.step = "vehicles";
+          if (sentDiscountCode) {
+            if (data.discount) {
+              state.discountApplied = data.discount;
+              state.discountError = null;
+            } else {
+              // Niet (meer) bruikbaar: geen code meer meesturen (anders blijft
+              // elke prijsaanvraag een foute poging) en de reden tonen.
+              state.discountApplied = null;
+              state.discountCode = "";
+              state.discountError = (data.discountError && data.discountError.message) || "Deze kortingscode kon niet worden gebruikt.";
+            }
+          }
         }
       } catch (err) {
         state.priceError = "Kon geen verbinding maken met de prijsberekening. Probeer het opnieuw.";
@@ -793,6 +822,29 @@
       const last = steps[steps.length - 1];
       if (new Date(last.to).getTime() !== getEffectiveDateTime().getTime()) return undefined;
       return steps.map((step) => ({ reason: step.reason, requestedDateTime: step.from, newDateTime: step.to }));
+    }
+
+    // ---- Kortingscode (11 oktober 2026) ----
+
+    function applyDiscountInput() {
+      const code = state.discountInput.trim();
+      if (!code) {
+        state.discountError = "Vul een kortingscode in.";
+        render();
+        return;
+      }
+      state.discountCode = code;
+      state.discountError = null;
+      fetchPrice();
+    }
+
+    function removeDiscount() {
+      state.discountCode = "";
+      state.discountApplied = null;
+      state.discountError = null;
+      state.discountInput = "";
+      state.discountOpen = false;
+      fetchPrice();
     }
 
     // ---- Online betalen: terugkeer van de betaalpagina (8 oktober 2026) ----
@@ -912,6 +964,10 @@
         // de klant na het betalen naartoe teruggestuurd wordt.
         customerNote: state.note || undefined,
         returnUrl: currentReturnUrl(),
+        // Kortingscode (11 oktober 2026): alleen als de server hem bij het
+        // tonen van de prijzen heeft bevestigd; de server controleert hem
+        // bij het boeken opnieuw en rekent de korting zelf uit.
+        discountCode: state.discountApplied ? state.discountApplied.code : undefined,
       };
 
       try {
@@ -921,7 +977,18 @@
           body: JSON.stringify(body),
         });
         const data = await response.json();
-        if (!response.ok) {
+        if (!response.ok && data.discountError) {
+          // De code geldt niet meer (bv. net door iemand anders gebruikt):
+          // terug naar de voertuigkeuze met de normale prijzen en de reden.
+          state.discountApplied = null;
+          state.discountCode = "";
+          state.bookError = null;
+          state.submitting = false;
+          await fetchPrice();
+          state.discountError = `${data.error} De prijzen zijn opnieuw berekend zonder korting.`;
+          render();
+          return;
+        } else if (!response.ok) {
           state.bookError = data.details ? `${data.error}: ${JSON.stringify(data.details)}` : data.error || `HTTP ${response.status}`;
         } else if (data.requiresPayment && data.paymentUrl) {
           // Online betalen: de rit wordt pas aangemaakt nadat de betaling
@@ -1674,6 +1741,103 @@
       return el("p", { class: "wnt-vehicle-surcharges", text: `Inclusief ${applied.length === 1 ? "toeslag" : "toeslagen"}: ${parts.join(", ")}` });
     }
 
+    // 11 oktober 2026: persoonlijke kortingscode op de voertuigkeuze. Een
+    // compacte link die een invulveld opent; na "Toepassen" vraagt de widget
+    // de prijzen opnieuw op (de server rekent de korting uit en bevestigt de
+    // code). Een code die niet (meer) geldt geeft een duidelijke melding.
+    function discountValueText(discount) {
+      return discount.kind === "percent" ? `${String(discount.value).replace(".", ",")}% korting` : `${euro(discount.value)} korting`;
+    }
+
+    function renderDiscountBox() {
+      const box = el("div", { class: "wnt-discount" });
+
+      if (state.discountApplied) {
+        box.appendChild(
+          el("p", { class: "wnt-discount-applied" }, [
+            "✓ Kortingscode ",
+            el("strong", { text: formatDiscountCode(state.discountApplied.code) }),
+            ` toegepast (${discountValueText(state.discountApplied)}). `,
+            el("button", {
+              type: "button",
+              class: "wnt-link-button",
+              text: "Verwijderen",
+              disabled: state.submitting ? "" : undefined,
+              onclick: removeDiscount,
+            }),
+          ])
+        );
+        return box;
+      }
+
+      if (!state.discountOpen && !state.discountError) {
+        box.appendChild(
+          el("button", {
+            type: "button",
+            class: "wnt-link-button",
+            text: "Heeft u een kortingscode?",
+            onclick: () => {
+              state.discountOpen = true;
+              render();
+              const input = document.querySelector(".wnt-discount-input");
+              if (input) input.focus();
+            },
+          })
+        );
+        return box;
+      }
+
+      const row = el("div", { class: "wnt-discount-row" });
+      row.appendChild(
+        el("input", {
+          type: "text",
+          class: "wnt-discount-input",
+          value: state.discountInput,
+          placeholder: "Uw kortingscode",
+          autocomplete: "off",
+          autocapitalize: "characters",
+          spellcheck: "false",
+          maxlength: "20",
+          "aria-label": "Kortingscode",
+          oninput: (e) => {
+            state.discountInput = e.target.value;
+          },
+          onkeydown: (e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              applyDiscountInput();
+            }
+          },
+        })
+      );
+      row.appendChild(
+        el("button", {
+          type: "button",
+          class: "wnt-button wnt-button-secondary",
+          text: state.submitting ? "Bezig…" : "Toepassen",
+          disabled: state.submitting ? "" : undefined,
+          onclick: applyDiscountInput,
+        })
+      );
+      box.appendChild(row);
+      if (state.discountError) box.appendChild(el("p", { class: "wnt-error", text: state.discountError }));
+      return box;
+    }
+
+    // Drie regels (geen doorgestreepte "oude" prijs): prijs, korting, totaal.
+    function renderDiscountedPrice(price) {
+      const line = (label, value, strong) =>
+        el("div", { class: "wnt-price-line" + (strong ? " wnt-price-line-total" : "") }, [
+          el("span", { text: label }),
+          el("span", { text: value }),
+        ]);
+      return el("div", { class: "wnt-vehicle-price-breakdown" }, [
+        line("Prijs", euro(price.originalTotalEuro)),
+        line(`Korting (${formatDiscountCode(price.discount.code)})`, `− ${euro(price.discount.amountEuro)}`),
+        line("Totaal", euro(price.totalEuro), true),
+      ]);
+    }
+
     function renderVehiclesStep() {
       const container = el("div", { class: "wnt-step" });
       container.appendChild(el("h2", { text: "Kies uw voertuig" }));
@@ -1712,6 +1876,8 @@
         baggageWarnings.forEach((w) => container.appendChild(el("p", { class: "wnt-hint", text: w })));
       }
 
+      container.appendChild(renderDiscountBox());
+
       const grid = el("div", { class: "wnt-vehicle-grid" });
       (state.priceResult ? state.priceResult.vehicles : []).forEach((vehicle) => {
         const isSelected = state.selectedVehicleId === vehicle.vehicleId;
@@ -1722,7 +1888,11 @@
         card.appendChild(el("h3", { text: vehicle.name }));
         card.appendChild(el("p", { class: "wnt-vehicle-model", text: vehicle.model }));
         if (vehicle.price) {
-          card.appendChild(el("p", { class: "wnt-vehicle-price", text: euro(vehicle.price.totalEuro) }));
+          if (vehicle.price.discount) {
+            card.appendChild(renderDiscountedPrice(vehicle.price));
+          } else {
+            card.appendChild(el("p", { class: "wnt-vehicle-price", text: euro(vehicle.price.totalEuro) }));
+          }
           // 10 oktober 2026 (Hans): laat zien waarom de prijs hoger is dan
           // normaal -- alle toegepaste toeslagen (spits, nacht, weekend,
           // feestdag, bijzondere bagage, boeking binnen 24 uur) met naam en
@@ -1872,7 +2042,17 @@
       const selectedVehicle =
         state.priceResult && (state.priceResult.vehicles || []).find((v) => v.vehicleId === state.selectedVehicleId);
       const totalToPay = selectedVehicle && selectedVehicle.price ? selectedVehicle.price.totalEuro : null;
-      if (onlinePayment.enabled) {
+      if (selectedVehicle && selectedVehicle.price && selectedVehicle.price.discount) {
+        const d = selectedVehicle.price.discount;
+        container.appendChild(
+          el("p", { class: "wnt-hint", text: `Kortingscode ${formatDiscountCode(d.code)} toegepast: − ${euro(d.amountEuro)}.` })
+        );
+      }
+      const freeRide = totalToPay === 0;
+      if (freeRide) {
+        container.appendChild(el("p", { class: "wnt-hint", text: "Met uw kortingscode is deze rit gratis. U hoeft niets te betalen." }));
+      }
+      if (onlinePayment.enabled && !freeRide) {
         const onlyIdeal = totalToPay !== null && totalToPay <= (onlinePayment.lowAmountThresholdEuro || 0);
         container.appendChild(
           el("p", {
@@ -1902,7 +2082,7 @@
           class: "wnt-button wnt-button-primary",
           text: state.submitting
             ? "Bezig…"
-            : onlinePayment.enabled
+            : onlinePayment.enabled && !freeRide
               ? totalToPay !== null
                 ? `Bevestig en betaal ${euro(totalToPay)}`
                 : "Bevestig en betaal"
@@ -1976,6 +2156,9 @@
         phoneNumber: p.phoneNumber,
         email: p.email,
         totalEuro: result.price.totalEuro,
+        discount: result.price.discount
+          ? { code: result.price.discount.code, amountEuro: result.price.discount.amountEuro, originalTotalEuro: result.price.originalTotalEuro }
+          : null,
       };
     }
 
@@ -2004,6 +2187,10 @@
       rows.push(["Naam", summary.name]);
       rows.push(["Telefoonnummer", summary.phoneNumber]);
       rows.push(["E-mailadres", summary.email]);
+      if (summary.discount) {
+        rows.push(["Prijs zonder korting", euro(summary.discount.originalTotalEuro)]);
+        rows.push([`Korting (${formatDiscountCode(summary.discount.code)})`, `− ${euro(summary.discount.amountEuro)}`]);
+      }
       rows.push([paid ? "Betaald" : "Totaalprijs", euro(summary.totalEuro)]);
 
       const list = el("dl", { class: "wnt-summary-list" });

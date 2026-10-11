@@ -572,3 +572,72 @@
 .wnt-new-booking {
   margin-top: 1rem;
 }
+
+/* Persoonlijke kortingscode (11 oktober 2026) */
+.wnt-link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 0.9em;
+  color: var(--wnt-accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.wnt-link-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.wnt-discount {
+  margin: 0.25rem 0 1rem;
+}
+
+.wnt-discount-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.wnt-discount-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.6em 0.7em;
+  border: 1px solid var(--wnt-border);
+  border-radius: var(--wnt-radius);
+  font-size: 1em;
+  font-family: inherit;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.wnt-discount-applied {
+  margin: 0;
+  font-size: 0.95em;
+}
+
+.wnt-discount .wnt-error {
+  margin: 0.35rem 0 0;
+}
+
+/* Prijs, korting en totaal op de voertuigkaart */
+.wnt-vehicle-price-breakdown {
+  margin: 0 0 0.5rem;
+  font-size: 0.9em;
+}
+
+.wnt-price-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.1em 0;
+}
+
+.wnt-price-line-total {
+  margin-top: 0.15rem;
+  padding-top: 0.3em;
+  border-top: 1px solid var(--wnt-border);
+  font-size: 1.15em;
+  font-weight: 700;
+}

@@ -2162,7 +2162,7 @@
       };
     }
 
-    function renderSummaryView({ summary, reference, warnings, paid }) {
+    function renderSummaryView({ summary, rideNumber, reference, warnings, paid }) {
       const container = el("div", { class: "wnt-step wnt-success" });
       const firstName = (summary.name || "").split(" ")[0];
       container.appendChild(el("h2", { text: "Uw rit is geboekt" }));
@@ -2175,7 +2175,11 @@
       );
 
       const rows = [];
-      if (reference) rows.push(["Referentie", reference]);
+      // Het ritnummer is het nummer dat ook in het taxiID-portaal staat, zodat een
+      // centralist de rit kan opzoeken. Alleen als dat ontbreekt tonen we de korte
+      // taxiID-referentie als terugval.
+      if (rideNumber) rows.push(["Ritnummer", rideNumber]);
+      else if (reference) rows.push(["Referentie", reference]);
       rows.push(["Ophalen", summary.originAddress]);
       rows.push(["Bestemming", summary.destinationAddress]);
       rows.push(["Datum en tijd", formatLongDateTime(new Date(summary.dateTime))]);
@@ -2235,6 +2239,7 @@
       const result = state.bookResult;
       return renderSummaryView({
         summary: result.summary || buildSummaryFromState(result),
+        rideNumber: result.rideNumber,
         reference: result.reference,
         warnings: result.warnings,
         paid: false,
@@ -2263,7 +2268,7 @@
       const phoneHint = "Neem telefonisch contact met ons op als u vragen heeft.";
 
       if (status === "completed") {
-        return renderSummaryView({ summary: view.summary, reference: view.reference, warnings: view.warnings, paid: true });
+        return renderSummaryView({ summary: view.summary, rideNumber: view.rideNumber, reference: view.reference, warnings: view.warnings, paid: true });
       }
 
       if (status === "payment_failed") {

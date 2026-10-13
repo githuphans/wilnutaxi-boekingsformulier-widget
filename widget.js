@@ -228,6 +228,11 @@
       roundTrip: false,
       returnDateTime: null,
       returnFlightNumber: "",
+      // Vluchtopzoeking en zelf ingevulde landingstijd van de terugvlucht
+      // (zelfde werking als flightInfo/flightManualLanding hierboven).
+      returnFlightInfo: null,
+      returnFlightManualLanding: "",
+      returnFlightManualOpen: false,
       returnTimeSteps: [],
       note: "",
       priceResult: null,
@@ -468,22 +473,60 @@
       return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
     }
 
-    function flightLookupKey() {
-      const flight = normalizeFlightNumberInput(state.flightNumber);
-      if (!flight) return null;
-      return `${flight}|${localDateString(getEffectiveDateTime())}`;
+    // Vluchtgegevens per rit (13 oktober 2026): de heenrit (ophaalrit vanaf een
+    // luchthaven) en de terugrit van een retourboeking (terugrit vanaf de
+    // luchthaven waar de heenrit naartoe gaat) gebruiken dezelfde opzoeking,
+    // landingscontrole en knoppen. `kind` is "outbound" (standaard) of "return".
+    function legFlight(kind) {
+      if (kind === "return") {
+        return {
+          get number() { return state.returnFlightNumber; },
+          get info() { return state.returnFlightInfo; },
+          set info(v) { state.returnFlightInfo = v; },
+          get manualLanding() { return state.returnFlightManualLanding; },
+          set manualLanding(v) { state.returnFlightManualLanding = v; },
+          get manualOpen() { return state.returnFlightManualOpen; },
+          set manualOpen(v) { state.returnFlightManualOpen = v; },
+          pickup: () => state.returnDateTime,
+          airportPoiId: () => state.destination.poiId,
+          active: () => isReturnAirportPickup(),
+          adopt: (date) => adoptReturnPickupTime(date, "flight"),
+        };
+      }
+      return {
+        get number() { return state.flightNumber; },
+        get info() { return state.flightInfo; },
+        set info(v) { state.flightInfo = v; },
+        get manualLanding() { return state.flightManualLanding; },
+        set manualLanding(v) { state.flightManualLanding = v; },
+        get manualOpen() { return state.flightManualOpen; },
+        set manualOpen(v) { state.flightManualOpen = v; },
+        pickup: () => getEffectiveDateTime(),
+        airportPoiId: () => state.origin.poiId,
+        active: () => isAirportPickup(),
+        adopt: (date) => adoptPickupTime(date, "flight"),
+      };
     }
 
-    async function lookupFlightInfo() {
-      if (!isAirportPickup()) return;
-      const key = flightLookupKey();
+    function flightLookupKey(kind) {
+      const f = legFlight(kind);
+      const flight = normalizeFlightNumberInput(f.number);
+      const pickup = f.pickup();
+      if (!flight || !pickup) return null;
+      return `${flight}|${localDateString(pickup)}`;
+    }
+
+    async function lookupFlightInfo(kind) {
+      const f = legFlight(kind);
+      if (!f.active()) return;
+      const key = flightLookupKey(kind);
       if (!key) {
-        state.flightInfo = null;
+        f.info = null;
         render();
         return;
       }
-      if (state.flightInfo && state.flightInfo.key === key) return;
-      state.flightInfo = { key, status: "pending", flights: [] };
+      if (f.info && f.info.key === key) return;
+      f.info = { key, status: "pending", flights: [] };
       render();
       const [flight, date] = key.split("|");
       let result = { key, status: "unavailable", flights: [] };
@@ -498,15 +541,28 @@
       }
       // Is de klant inmiddels iets anders gaan invullen, dan negeren we dit
       // verouderde antwoord.
-      if (!state.flightInfo || state.flightInfo.key !== key) return;
-      state.flightInfo = result;
+      if (!f.info || f.info.key !== key) return;
+      f.info = result;
       render();
+    }
+
+    // Opzoeken/hertekenen een fractie later dan het 'change'-event: dat event
+    // komt van het veld dat de focus verliest, en gebeurt vaak precies terwijl
+    // de klant op een knop drukt. Zouden we dan meteen opnieuw tekenen, dan
+    // verdwijnt de knop onder de vinger en gaat de eerste klik verloren.
+    let flightRefreshTimer = null;
+    function scheduleFlightRefresh(fn) {
+      if (flightRefreshTimer) clearTimeout(flightRefreshTimer);
+      flightRefreshTimer = setTimeout(() => {
+        flightRefreshTimer = null;
+        fn();
+      }, 350);
     }
 
     // Bij een vlucht met meerdere etappes: kies de etappe die op de gekozen
     // luchthaven aankomt (op naam/plaats), anders de eerste.
-    function pickFlightLeg(flights) {
-      const poi = findPoiById(state.origin.poiId);
+    function pickFlightLeg(flights, kind) {
+      const poi = findPoiById(legFlight(kind).airportPoiId());
       const poiName = poi ? String(poi.name).toLowerCase() : "";
       const ignore = ["airport", "international", "intl", "airfield"];
       const words = (text) =>
@@ -554,9 +610,9 @@
       return !!(poi && poi.category === "Vliegveld");
     }
 
-    function adoptReturnPickupTime(newDate) {
+    function adoptReturnPickupTime(newDate, reason) {
       const from = state.returnDateTime;
-      state.returnTimeSteps.push({ reason: "capacity", from: from ? from.toISOString() : newDate.toISOString(), to: newDate.toISOString() });
+      state.returnTimeSteps.push({ reason: reason || "capacity", from: from ? from.toISOString() : newDate.toISOString(), to: newDate.toISOString() });
       state.returnDateTime = newDate;
     }
 
@@ -577,6 +633,16 @@
         if (flight) body.flightNumber = flight;
         const adjustments = currentReturnTimeAdjustments();
         if (adjustments) body.timeAdjustments = adjustments;
+        // Notitie voor de chauffeur bij een terugrit vanaf een luchthaven
+        // (zelfde zinnen als bij de heenrit).
+        if (isReturnAirportPickup()) {
+          const parts = [];
+          if (hasBaggageToCollect()) parts.push("Passagier moet bagage van de bagageband ophalen (langere wachttijd na landing).");
+          else if (state.hasBaggage === false) parts.push("Passagier heeft alleen handbagage bij zich.");
+          const manualLanding = manualLandingDate("return");
+          if (manualLanding) parts.push(`Geplande landingstijd (door passagier opgegeven): ${formatClock(manualLanding.toISOString())}.`);
+          if (parts.length) body.note = parts.join(" ");
+        }
       }
       return body;
     }
@@ -584,26 +650,28 @@
     // Knop "Ophaaltijd aanpassen aan de landing": alleen als de gekozen
     // ophaaltijd vóór de landing ligt (Hans, 6 oktober 2026: niet bij een
     // latere tijd). De ophaaltijd wordt precies de landingstijd.
-    function renderAdjustToLandingButton(landingDate) {
-      if (!(getEffectiveDateTime().getTime() < landingDate.getTime())) return null;
+    function renderAdjustToLandingButton(landingDate, kind) {
+      const f = legFlight(kind);
+      const pickup = f.pickup();
+      if (!pickup || !(pickup.getTime() < landingDate.getTime())) return null;
       return el("button", {
         type: "button",
         class: "wnt-button wnt-button-danger wnt-button-small",
         text: `Ophaaltijd aanpassen aan de landing (${formatClock(landingDate.toISOString())})`,
         onclick: () => {
-          adoptPickupTime(landingDate, "flight");
+          f.adopt(landingDate);
           render();
           // De opzoeking geldt per ophaaldatum; die kan hiermee zijn verschoven.
-          if (isAirportPickup() && state.flightNumber.trim()) lookupFlightInfo();
+          if (f.active() && f.number.trim()) lookupFlightInfo(kind);
         },
       });
     }
 
     // Landingstijd uit de opzoeking (ISO) of null.
-    function lookedUpLandingIso() {
-      const info = state.flightInfo;
+    function lookedUpLandingIso(kind) {
+      const info = legFlight(kind).info;
       if (!info || info.status !== "found" || !info.flights || !info.flights.length) return null;
-      const leg = pickFlightLeg(info.flights);
+      const leg = pickFlightLeg(info.flights, kind);
       return leg.estimatedArrivalUtc || leg.scheduledArrivalUtc || null;
     }
 
@@ -611,21 +679,24 @@
     // gekozen ophaaltijd ligt, anders null. Hans, 6 oktober 2026: de klant
     // mag pas naar de bagage-stap als dit is opgelost -- door de rode knop
     // te gebruiken of zelf een ophaaltijd vanaf de landing te kiezen.
-    function landingAfterPickup() {
-      if (!isAirportPickup() || !state.flightNumber.trim()) return null;
-      const iso = lookedUpLandingIso();
-      const landing = iso ? new Date(iso) : manualLandingDate();
+    function landingAfterPickup(kind) {
+      const f = legFlight(kind);
+      const pickup = f.pickup();
+      if (!f.active() || !f.number.trim() || !pickup) return null;
+      const iso = lookedUpLandingIso(kind);
+      const landing = iso ? new Date(iso) : manualLandingDate(kind);
       if (!landing || isNaN(landing.getTime())) return null;
-      return getEffectiveDateTime().getTime() < landing.getTime() ? landing : null;
+      return pickup.getTime() < landing.getTime() ? landing : null;
     }
 
     // Door de passagier ingevulde landingstijd als Date, op de ophaaldag.
     // Landt de vlucht 's avonds en is de rit na middernacht (tijd ligt dan
     // meer dan 12 uur NA de ophaaltijd), dan nemen we de dag ervoor.
-    function manualLandingDate() {
-      const match = /^(\d{1,2}):(\d{2})$/.exec(state.flightManualLanding || "");
-      if (!match || lookedUpLandingIso()) return null;
-      const pickup = getEffectiveDateTime();
+    function manualLandingDate(kind) {
+      const f = legFlight(kind);
+      const match = /^(\d{1,2}):(\d{2})$/.exec(f.manualLanding || "");
+      const pickup = f.pickup();
+      if (!match || !pickup || lookedUpLandingIso(kind)) return null;
       const landing = new Date(pickup);
       landing.setHours(Number(match[1]), Number(match[2]), 0, 0);
       if (landing.getTime() - pickup.getTime() > 12 * 3600 * 1000) landing.setDate(landing.getDate() - 1);
@@ -634,18 +705,20 @@
 
     // Knop/veld om de geplande landingstijd zelf in te vullen, getoond zodra
     // er een vluchtnummer staat en de opzoeking geen landingstijd gaf.
-    function renderManualLanding() {
-      if (!state.flightNumber.trim() || lookedUpLandingIso()) return null;
-      if (state.flightInfo && state.flightInfo.status === "pending") return null;
+    function renderManualLanding(kind) {
+      const f = legFlight(kind);
+      if (!f.number.trim() || lookedUpLandingIso(kind)) return null;
+      if (f.info && f.info.status === "pending") return null;
+      const pickup = f.pickup();
       const wrapper = el("div", { class: "wnt-flight-manual" });
-      if (!state.flightManualOpen && !state.flightManualLanding) {
+      if (!f.manualOpen && !f.manualLanding) {
         wrapper.appendChild(
           el("button", {
             type: "button",
             class: "wnt-button wnt-button-secondary wnt-button-small",
             text: "Geplande landingstijd zelf invullen",
             onclick: () => {
-              state.flightManualOpen = true;
+              f.manualOpen = true;
               render();
             },
           })
@@ -656,9 +729,9 @@
       wrapper.appendChild(
         el("input", {
           type: "time",
-          value: state.flightManualLanding,
+          value: f.manualLanding,
           onchange: (e) => {
-            state.flightManualLanding = e.target.value || "";
+            f.manualLanding = e.target.value || "";
             render();
           },
         })
@@ -669,29 +742,30 @@
           class: "wnt-button wnt-button-secondary wnt-button-small",
           text: "Wissen",
           onclick: () => {
-            state.flightManualLanding = "";
-            state.flightManualOpen = false;
+            f.manualLanding = "";
+            f.manualOpen = false;
             render();
           },
         })
       );
-      const landing = manualLandingDate();
-      if (landing && getEffectiveDateTime().getTime() < landing.getTime()) {
+      const landing = manualLandingDate(kind);
+      if (landing && pickup && pickup.getTime() < landing.getTime()) {
         wrapper.appendChild(
           el("p", { class: "wnt-warning" }, [
-            `Let op: uw vlucht landt om ${formatClock(landing.toISOString())}, na uw gekozen ophaaltijd (${formatClock(getEffectiveDateTime().toISOString())}). U kunt pas verder nadat u de ophaaltijd hebt aangepast.`,
+            `Let op: uw vlucht landt om ${formatClock(landing.toISOString())}, na uw gekozen ophaaltijd (${formatClock(pickup.toISOString())}). U kunt pas verder nadat u de ophaaltijd hebt aangepast.`,
           ])
         );
-        const adjustButton = renderAdjustToLandingButton(landing);
+        const adjustButton = renderAdjustToLandingButton(landing, kind);
         if (adjustButton) wrapper.appendChild(adjustButton);
       }
       return wrapper;
     }
 
-    function renderFlightInfo() {
-      const info = state.flightInfo;
+    function renderFlightInfo(kind) {
+      const f = legFlight(kind);
+      const info = f.info;
       if (!info) {
-        if (state.flightNumber.trim() && !normalizeFlightNumberInput(state.flightNumber)) {
+        if (f.number.trim() && !normalizeFlightNumberInput(f.number)) {
           return el("p", { class: "wnt-hint wnt-flight-info" }, [
             "Dit lijkt geen vluchtnummer. Een vluchtnummer bestaat uit twee letters/cijfers en een nummer, bijvoorbeeld KL1234 of KL 1234.",
           ]);
@@ -708,12 +782,13 @@
       }
       if (info.status !== "found" || !info.flights || !info.flights.length) return null;
 
-      const leg = pickFlightLeg(info.flights);
+      const leg = pickFlightLeg(info.flights, kind);
+      const pickup = f.pickup();
       const tz = leg.arrivalTimeZone || "Europe/Amsterdam";
       const where = [leg.origin.city || leg.origin.name, leg.origin.iata ? `(${leg.origin.iata})` : ""].filter(Boolean).join(" ");
       const wrapper = el("div", { class: "wnt-flight-info" });
       const landing = leg.estimatedArrivalUtc || leg.scheduledArrivalUtc;
-      const parts = [el("strong", { text: leg.number || normalizeFlightNumberInput(state.flightNumber) }), ` komt uit ${where}`];
+      const parts = [el("strong", { text: leg.number || normalizeFlightNumberInput(f.number) }), ` komt uit ${where}`];
       if (leg.scheduledArrivalUtc) {
         parts.push(`, geplande aankomst ${formatDayAndClock(leg.scheduledArrivalUtc, tz)}`);
         if (leg.estimatedArrivalUtc && leg.estimatedArrivalUtc !== leg.scheduledArrivalUtc) {
@@ -723,13 +798,13 @@
       parts.push(". Klopt dit? Zo niet, controleer dan het vluchtnummer.");
       wrapper.appendChild(el("p", { class: "wnt-hint" }, parts));
 
-      if (landing && getEffectiveDateTime().getTime() < new Date(landing).getTime()) {
+      if (landing && pickup && pickup.getTime() < new Date(landing).getTime()) {
         wrapper.appendChild(
           el("p", { class: "wnt-warning" }, [
-            `Let op: deze vlucht landt om ${formatClock(landing, tz)}, na uw gekozen ophaaltijd (${formatClock(getEffectiveDateTime().toISOString(), tz)}). U kunt pas verder nadat u de ophaaltijd hebt aangepast.`,
+            `Let op: deze vlucht landt om ${formatClock(landing, tz)}, na uw gekozen ophaaltijd (${formatClock(pickup.toISOString(), tz)}). U kunt pas verder nadat u de ophaaltijd hebt aangepast.`,
           ])
         );
-        const adjustButton = renderAdjustToLandingButton(new Date(landing));
+        const adjustButton = renderAdjustToLandingButton(new Date(landing), kind);
         if (adjustButton) wrapper.appendChild(adjustButton);
       }
       return wrapper;
@@ -1428,7 +1503,7 @@
             // Pas bij verlaten van het veld opzoeken (niet bij elke
             // toetsaanslag: bespaart aanroepen en laat de cursor met rust).
             onchange: () => {
-              lookupFlightInfo();
+              scheduleFlightRefresh(() => lookupFlightInfo());
             },
           })
         );
@@ -1460,6 +1535,9 @@
               if (!state.roundTrip) {
                 state.returnDateTime = null;
                 state.returnFlightNumber = "";
+                state.returnFlightInfo = null;
+                state.returnFlightManualLanding = "";
+                state.returnFlightManualOpen = false;
                 state.returnTimeSteps = [];
               }
               render();
@@ -1494,6 +1572,12 @@
               } else {
                 returnDateHint.textContent = "Kies een vaste datum en tijd. Weet u dat nog niet? Boek de terugrit dan later als losse rit.";
               }
+              // Andere terugritdag/-tijd: de vluchtopzoeking en de landingscontrole
+              // gelden per datum en ophaaltijd.
+              scheduleFlightRefresh(() => {
+                render();
+                if (isReturnAirportPickup() && state.returnFlightNumber.trim()) lookupFlightInfo("return");
+              });
             },
           })
         );
@@ -1516,11 +1600,19 @@
             oninput: (e) => {
               state.returnFlightNumber = e.target.value;
             },
+            // Pas bij verlaten van het veld opzoeken (zoals bij de heenrit).
+            onchange: () => {
+              scheduleFlightRefresh(() => lookupFlightInfo("return"));
+            },
           })
         );
         returnFlightBox.appendChild(
-          el("p", { class: "wnt-hint", text: "De terugrit begint op de luchthaven. Zo kunnen we de vlucht volgen en op tijd klaarstaan, ook bij vertraging." })
+          el("p", { class: "wnt-hint", text: "De terugrit begint op de luchthaven. Zo kunnen we de vlucht volgen en op tijd klaarstaan, ook bij vertraging. U mag het vluchtnummer met of zonder spatie invullen." })
         );
+        const returnFlightInfoNode = renderFlightInfo("return");
+        if (returnFlightInfoNode) returnFlightBox.appendChild(returnFlightInfoNode);
+        const returnManualLandingNode = renderManualLanding("return");
+        if (returnManualLandingNode) returnFlightBox.appendChild(returnManualLandingNode);
         returnBox.appendChild(returnFlightBox);
       }
       container.appendChild(returnBox);
@@ -1639,6 +1731,13 @@
               }
               if (isReturnAirportPickup() && !state.returnFlightNumber.trim()) {
                 alert("Vul het vluchtnummer van uw terugvlucht in, zodat we de vlucht kunnen volgen en op tijd voor u klaarstaan.");
+                return;
+              }
+              const returnConflictLanding = landingAfterPickup("return");
+              if (returnConflictLanding) {
+                alert(
+                  `Uw terugvlucht landt om ${formatClock(returnConflictLanding.toISOString())}, na de gekozen ophaaltijd van de terugrit. Klik op de rode knop "Ophaaltijd aanpassen aan de landing" of kies zelf een later ophaaltijdstip, dan kunt u verder.`
+                );
                 return;
               }
             }

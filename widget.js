@@ -219,6 +219,16 @@
       // duidelijke melding krijgt (voorkomt latere discussies). Zodra de
       // klant daarna zelf het datumveld wijzigt, wordt de lijst leeggemaakt.
       timeSteps: [],
+      // 12 oktober 2026: retourrit in dezelfde boeking. De terugrit gebruikt de
+      // omgekeerde adressen en dezelfde passagiers, bagage en voertuigcategorie;
+      // de klant kiest alleen datum en tijd (verplicht), en bij een terugrit
+      // die op een luchthaven begint ook het vluchtnummer van de terugvlucht.
+      // `returnTimeSteps`: zoals timeSteps, voor een via "Kies dit tijdstip"
+      // overgenomen tijd van de terugrit.
+      roundTrip: false,
+      returnDateTime: null,
+      returnFlightNumber: "",
+      returnTimeSteps: [],
       note: "",
       priceResult: null,
       priceError: null,
@@ -533,6 +543,44 @@
       state.dateTimeTouched = true;
     }
 
+    // ---- Retourrit (12 oktober 2026) ----
+
+    // De terugrit begint op de bestemming van de heenrit: is dat een luchthaven,
+    // dan is het vluchtnummer van de terugvlucht verplicht (zelfde regel als
+    // bij een luchthaven-ophaalrit, zie isAirportPickup).
+    function isReturnAirportPickup() {
+      if (!state.roundTrip || !state.destination.poiId) return false;
+      const poi = findPoiById(state.destination.poiId);
+      return !!(poi && poi.category === "Vliegveld");
+    }
+
+    function adoptReturnPickupTime(newDate) {
+      const from = state.returnDateTime;
+      state.returnTimeSteps.push({ reason: "capacity", from: from ? from.toISOString() : newDate.toISOString(), to: newDate.toISOString() });
+      state.returnDateTime = newDate;
+    }
+
+    function currentReturnTimeAdjustments() {
+      const steps = state.returnTimeSteps || [];
+      if (!steps.length || !state.returnDateTime) return undefined;
+      const last = steps[steps.length - 1];
+      if (new Date(last.to).getTime() !== state.returnDateTime.getTime()) return undefined;
+      return steps.map((step) => ({ reason: step.reason, requestedDateTime: step.from, newDateTime: step.to }));
+    }
+
+    // Het deel van de aanvraag voor de terugrit, of undefined zonder retourrit.
+    function returnTripBody(withDetails) {
+      if (!state.roundTrip || !state.returnDateTime) return undefined;
+      const body = { dateTime: state.returnDateTime.toISOString() };
+      if (withDetails) {
+        const flight = isReturnAirportPickup() ? normalizeFlightNumberInput(state.returnFlightNumber) || state.returnFlightNumber.trim() : "";
+        if (flight) body.flightNumber = flight;
+        const adjustments = currentReturnTimeAdjustments();
+        if (adjustments) body.timeAdjustments = adjustments;
+      }
+      return body;
+    }
+
     // Knop "Ophaaltijd aanpassen aan de landing": alleen als de gekozen
     // ophaaltijd vóór de landing ligt (Hans, 6 oktober 2026: niet bij een
     // latere tijd). De ophaaltijd wordt precies de landingstijd.
@@ -779,6 +827,7 @@
         originAddress: state.origin.text,
         destinationAddress: state.destination.text,
         discountCode: sentDiscountCode || undefined,
+        returnTrip: returnTripBody(false),
       };
 
       try {
@@ -968,6 +1017,7 @@
         // tonen van de prijzen heeft bevestigd; de server controleert hem
         // bij het boeken opnieuw en rekent de korting zelf uit.
         discountCode: state.discountApplied ? state.discountApplied.code : undefined,
+        returnTrip: returnTripBody(true),
       };
 
       try {
@@ -1287,8 +1337,17 @@
       }
       updateServiceAreaWarning();
 
-      container.appendChild(renderAddressField("Ophaaladres", "origin", updateServiceAreaWarning));
-      container.appendChild(renderAddressField("Bestemming", "destination", updateServiceAreaWarning));
+      // Retourrit (12 oktober 2026): toont/verbergt het vluchtnummer van de
+      // terugvlucht en de tekst "van ... naar ..." zodra een adres verandert,
+      // zonder het hele scherm opnieuw te tekenen (zelfde reden als hierboven:
+      // typen mag de focus niet verliezen).
+      let updateReturnBlock = () => {};
+      const onAddressChange = () => {
+        updateServiceAreaWarning();
+        updateReturnBlock();
+      };
+      container.appendChild(renderAddressField("Ophaaladres", "origin", onAddressChange));
+      container.appendChild(renderAddressField("Bestemming", "destination", onAddressChange));
       container.appendChild(serviceAreaWarning);
 
       const dateWrapper = el("div", { class: "wnt-field" });
@@ -1384,6 +1443,87 @@
         if (manualLandingNode) flightWrapper.appendChild(manualLandingNode);
         container.appendChild(flightWrapper);
       }
+
+      // ---- Retourrit in dezelfde boeking (12 oktober 2026) ----
+      // Eén keer betalen voor heen- en terugrit. De terugrit gebruikt de
+      // omgekeerde adressen, dezelfde passagiers, bagage en voertuigcategorie;
+      // wie iets anders wil (andere bagage of route) boekt twee losse ritten.
+      const returnBox = el("div", { class: "wnt-field wnt-roundtrip" });
+      returnBox.appendChild(
+        el("label", { class: "wnt-radio-label", for: "wnt-round-trip" }, [
+          el("input", {
+            type: "checkbox",
+            id: "wnt-round-trip",
+            checked: state.roundTrip ? "" : undefined,
+            onchange: (e) => {
+              state.roundTrip = e.target.checked;
+              if (!state.roundTrip) {
+                state.returnDateTime = null;
+                state.returnFlightNumber = "";
+                state.returnTimeSteps = [];
+              }
+              render();
+            },
+          }),
+          " Ook een retourrit boeken",
+        ])
+      );
+      if (state.roundTrip) {
+        const returnRoute = el("p", { class: "wnt-hint" });
+        const returnFlightBox = el("div", { class: "wnt-field", hidden: !isReturnAirportPickup() });
+        updateReturnBlock = () => {
+          returnRoute.textContent = `Terugrit: van ${state.destination.text.trim() || "de bestemming"} naar ${state.origin.text.trim() || "het ophaaladres"}, met dezelfde passagiers, bagage en voertuigcategorie. Wilt u iets anders? Boek dan twee losse ritten.`;
+          returnFlightBox.hidden = !isReturnAirportPickup();
+        };
+        updateReturnBlock();
+        returnBox.appendChild(returnRoute);
+
+        const returnDateField = el("div", { class: "wnt-field" });
+        returnDateField.appendChild(el("label", { text: "Datum en tijd terugrit" }));
+        returnDateField.appendChild(
+          el("input", {
+            type: "datetime-local",
+            id: "wnt-return-datetime",
+            value: state.returnDateTime ? toDateTimeLocalValue(state.returnDateTime) : "",
+            min: toDateTimeLocalValue(getEffectiveDateTime()),
+            onchange: (e) => {
+              state.returnDateTime = e.target.value ? localInputValueToDate(e.target.value) : null;
+              state.returnTimeSteps = [];
+              if (state.returnDateTime) {
+                returnDateHint.textContent = `Gekozen: ${formatDateTime(state.returnDateTime)}`;
+              } else {
+                returnDateHint.textContent = "Kies een vaste datum en tijd. Weet u dat nog niet? Boek de terugrit dan later als losse rit.";
+              }
+            },
+          })
+        );
+        const returnDateHint = el("p", {
+          class: "wnt-hint",
+          text: state.returnDateTime
+            ? `Gekozen: ${formatDateTime(state.returnDateTime)}`
+            : "Kies een vaste datum en tijd. Weet u dat nog niet? Boek de terugrit dan later als losse rit.",
+        });
+        returnDateField.appendChild(returnDateHint);
+        returnBox.appendChild(returnDateField);
+
+        returnFlightBox.appendChild(el("label", { text: "Vluchtnummer terugvlucht" }));
+        returnFlightBox.appendChild(
+          el("input", {
+            type: "text",
+            id: "wnt-return-flight",
+            value: state.returnFlightNumber,
+            placeholder: "bijv. KL1234 of KL 1234",
+            oninput: (e) => {
+              state.returnFlightNumber = e.target.value;
+            },
+          })
+        );
+        returnFlightBox.appendChild(
+          el("p", { class: "wnt-hint", text: "De terugrit begint op de luchthaven. Zo kunnen we de vlucht volgen en op tijd klaarstaan, ook bij vertraging." })
+        );
+        returnBox.appendChild(returnFlightBox);
+      }
+      container.appendChild(returnBox);
 
       const passengersRow = el("div", { class: "wnt-row wnt-passengers-row" });
       passengersRow.appendChild(renderStepperField("Aantal volwassenen", state.passengerCount, 1, 8, (v) => (state.passengerCount = v)));
@@ -1485,6 +1625,22 @@
                 `Uw vlucht landt om ${formatClock(conflictLanding.toISOString())}, na uw gekozen ophaaltijd. Klik op de rode knop "Ophaaltijd aanpassen aan de landing" of kies zelf een later ophaaltijdstip, dan kunt u verder.`
               );
               return;
+            }
+            // Retourrit (12 oktober 2026): vaste datum en tijd verplicht, later dan
+            // de heenrit, en bij een terugrit vanaf een luchthaven het vluchtnummer.
+            if (state.roundTrip) {
+              if (!state.returnDateTime) {
+                alert("Kies de datum en tijd van de terugrit, of haal het vinkje bij 'Ook een retourrit boeken' weg.");
+                return;
+              }
+              if (state.returnDateTime.getTime() <= getEffectiveDateTime().getTime()) {
+                alert("De terugrit moet later zijn dan de heenrit. Controleer de datum en tijd van de terugrit.");
+                return;
+              }
+              if (isReturnAirportPickup() && !state.returnFlightNumber.trim()) {
+                alert("Vul het vluchtnummer van uw terugvlucht in, zodat we de vlucht kunnen volgen en op tijd voor u klaarstaan.");
+                return;
+              }
             }
             if (state.hasBaggage === false) {
               // Geen bagage-stap nodig. Extra zekerheid (naast de reset in
@@ -1717,28 +1873,33 @@
     // de prijs verandert er niet door. Omdat een klant hieraan verwachtingen
     // kan ontlenen staat de vrijwaring bewust ALTIJD zichtbaar direct onder
     // de tijd (niet achter een ⓘ), en wordt er één "ca."-tijdstip getoond.
-    function renderEstimatedArrival(iso) {
+    function renderEstimatedArrival(iso, pickupDate, label, withDisclaimer) {
       if (!iso || Number.isNaN(new Date(iso).getTime())) return null;
-      const pickup = getEffectiveDateTime().toISOString();
+      const pickup = (pickupDate || getEffectiveDateTime()).toISOString();
       const sameDay =
         new Intl.DateTimeFormat("nl-NL", { dateStyle: "short", timeZone: "Europe/Amsterdam" }).format(new Date(pickup)) ===
           new Intl.DateTimeFormat("nl-NL", { dateStyle: "short", timeZone: "Europe/Amsterdam" }).format(new Date(iso));
       const when = sameDay ? formatClock(iso) : formatDayAndClock(iso);
       return el("div", { class: "wnt-arrival" }, [
-        el("p", { class: "wnt-arrival-line" }, ["Verwachte aankomst: ", el("strong", { text: `ca. ${when}` })]),
-        el("p", { class: "wnt-arrival-disclaimer" }, [
-          "Dit is een schatting op basis van de gebruikelijke drukte op het gekozen tijdstip. De werkelijke aankomsttijd kan afwijken, bijvoorbeeld door files, weer of wegwerkzaamheden. Aan deze schatting kunnen geen rechten worden ontleend. De prijs blijft ongewijzigd.",
-        ]),
+        el("p", { class: "wnt-arrival-line" }, [label || "Verwachte aankomst: ", el("strong", { text: `ca. ${when}` })]),
+        withDisclaimer === false
+          ? null
+          : el("p", { class: "wnt-arrival-disclaimer" }, [
+              "Dit is een schatting op basis van de gebruikelijke drukte op het gekozen tijdstip. De werkelijke aankomsttijd kan afwijken, bijvoorbeeld door files, weer of wegwerkzaamheden. Aan deze schatting kunnen geen rechten worden ontleend. De prijs blijft ongewijzigd.",
+            ]),
       ]);
     }
 
-    function renderAppliedSurcharges(price) {
+    function renderAppliedSurcharges(price, prefix) {
       const applied = ((price && price.appliedSurcharges) || []).filter(
         (item) => item && item.name && Number.isFinite(item.amountEuro) && item.amountEuro > 0
       );
       if (!applied.length) return null;
       const parts = applied.map((item) => `${item.name} (+${euro(item.amountEuro)})`);
-      return el("p", { class: "wnt-vehicle-surcharges", text: `Inclusief ${applied.length === 1 ? "toeslag" : "toeslagen"}: ${parts.join(", ")}` });
+      return el("p", {
+        class: "wnt-vehicle-surcharges",
+        text: `${prefix ? prefix + ": inclusief" : "Inclusief"} ${applied.length === 1 ? "toeslag" : "toeslagen"}: ${parts.join(", ")}`,
+      });
     }
 
     // 11 oktober 2026: persoonlijke kortingscode op de voertuigkeuze. Een
@@ -1838,6 +1999,25 @@
       ]);
     }
 
+    // Retourboeking (12 oktober 2026): prijs van heen- en terugrit en het
+    // totaal (met eventuele korting over het geheel). De bedragen komen van de
+    // server (vehicle.roundTrip); de widget rekent niets zelf uit.
+    function renderRoundTripPrice(vehicle) {
+      const rt = vehicle.roundTrip;
+      const line = (label, value, strong) =>
+        el("div", { class: "wnt-price-line" + (strong ? " wnt-price-line-total" : "") }, [
+          el("span", { text: label }),
+          el("span", { text: value }),
+        ]);
+      const outbound = vehicle.price.originalTotalEuro != null ? vehicle.price.originalTotalEuro : vehicle.price.totalEuro;
+      const back = vehicle.returnTrip.price;
+      const backOriginal = back.originalTotalEuro != null ? back.originalTotalEuro : back.totalEuro;
+      const lines = [line("Heenrit", euro(outbound)), line("Terugrit", euro(backOriginal))];
+      if (rt.discount) lines.push(line(`Korting (${formatDiscountCode(rt.discount.code)})`, `− ${euro(rt.discount.amountEuro)}`));
+      lines.push(line("Totaal", euro(rt.totalEuro), true));
+      return el("div", { class: "wnt-vehicle-price-breakdown" }, lines);
+    }
+
     function renderVehiclesStep() {
       const container = el("div", { class: "wnt-step" });
       container.appendChild(el("h2", { text: "Kies uw voertuig" }));
@@ -1850,8 +2030,24 @@
             )} min.`,
           ])
         );
-        const arrivalNode = renderEstimatedArrival(state.priceResult.route.estimatedArrival);
+        const isRound = Boolean(state.roundTrip && state.priceResult.returnRoute);
+        const arrivalNode = renderEstimatedArrival(
+          state.priceResult.route.estimatedArrival,
+          getEffectiveDateTime(),
+          isRound ? "Verwachte aankomst heenrit: " : undefined,
+          !isRound
+        );
         if (arrivalNode) container.appendChild(arrivalNode);
+        if (isRound) {
+          const back = state.priceResult.returnRoute;
+          container.appendChild(
+            el("p", { class: "wnt-hint" }, [
+              `Terugrit op ${formatDateTime(state.returnDateTime)}. Afstand: ${back.distanceKm.toFixed(1)} km, rijtijd: ${Math.round(back.durationMinutes)} min.`,
+            ])
+          );
+          const backArrival = renderEstimatedArrival(back.estimatedArrival, state.returnDateTime, "Verwachte aankomst terugrit: ");
+          if (backArrival) container.appendChild(backArrival);
+        }
       }
 
       // 2 september 2026 (Hans: "volgens mij werkt het berekenen van de
@@ -1887,7 +2083,14 @@
         card.appendChild(renderVehicleImage(vehicle));
         card.appendChild(el("h3", { text: vehicle.name }));
         card.appendChild(el("p", { class: "wnt-vehicle-model", text: vehicle.model }));
-        if (vehicle.price) {
+        const roundTripPrices = Boolean(state.roundTrip && vehicle.roundTrip && vehicle.price && vehicle.returnTrip && vehicle.returnTrip.price);
+        if (roundTripPrices) {
+          card.appendChild(renderRoundTripPrice(vehicle));
+          const outSurcharges = renderAppliedSurcharges(vehicle.price, "Heenrit");
+          if (outSurcharges) card.appendChild(outSurcharges);
+          const backSurcharges = renderAppliedSurcharges(vehicle.returnTrip.price, "Terugrit");
+          if (backSurcharges) card.appendChild(backSurcharges);
+        } else if (vehicle.price && !(state.roundTrip && vehicle.returnTrip)) {
           if (vehicle.price.discount) {
             card.appendChild(renderDiscountedPrice(vehicle.price));
           } else {
@@ -1914,8 +2117,17 @@
           // Zou bagage eerst getoond worden, dan kan dat ten onrechte de
           // indruk wekken dat een andere bagagekeuze het zou oplossen.
           let reasonText;
-          if (vehicle.capacity && vehicle.capacity.full) {
-            reasonText = vehicle.capacity.reason || "Dit voertuigtype is voor het gekozen tijdstip helaas al volgeboekt.";
+          // Retourboeking: ook de terugrit kan vol zijn; de melding zegt welke rit.
+          const outboundFull = Boolean(vehicle.capacity && vehicle.capacity.full);
+          const returnFull = Boolean(state.roundTrip && vehicle.returnTrip && vehicle.returnTrip.capacity && vehicle.returnTrip.capacity.full);
+          const legPrefix = state.roundTrip ? (outboundFull ? "Heenrit: " : "Terugrit: ") : "";
+          const fullLeg = outboundFull
+            ? { capacity: vehicle.capacity, adopt: (d) => adoptPickupTime(d, "capacity") }
+            : returnFull
+              ? { capacity: vehicle.returnTrip.capacity, adopt: (d) => adoptReturnPickupTime(d) }
+              : null;
+          if (fullLeg) {
+            reasonText = legPrefix + (fullLeg.capacity.reason || "Dit voertuigtype is voor het gekozen tijdstip helaas al volgeboekt.");
           } else if (!vehicle.baggage.fits) {
             reasonText = vehicle.baggage.reason || "Bagage past niet in dit voertuig.";
           } else {
@@ -1928,8 +2140,8 @@
           // eerder (een eerder moment kan onder de 24-uursgrens vallen).
           // De knop neemt dat tijdstip over en rekent de prijs opnieuw uit
           // -- de prijs kan op dat moment anders zijn (nacht-/weekendtoeslag).
-          if (vehicle.capacity && vehicle.capacity.full && vehicle.capacity.nextAvailableAt) {
-            const nextAt = new Date(vehicle.capacity.nextAvailableAt);
+          if (fullLeg && fullLeg.capacity.nextAvailableAt) {
+            const nextAt = new Date(fullLeg.capacity.nextAvailableAt);
             if (!isNaN(nextAt.getTime())) {
               card.appendChild(
                 el("p", { class: "wnt-vehicle-next-available" }, [
@@ -1945,7 +2157,7 @@
                   text: "Kies dit tijdstip",
                   disabled: state.submitting,
                   onclick: () => {
-                    adoptPickupTime(nextAt, "capacity");
+                    fullLeg.adopt(nextAt);
                     fetchPrice();
                   },
                 })
@@ -1955,6 +2167,12 @@
         }
         if (vehicle.price && vehicle.price.warnings && vehicle.price.warnings.length) {
           vehicle.price.warnings.forEach((w) => card.appendChild(el("p", { class: "wnt-vehicle-warning", text: w })));
+        }
+        if (state.roundTrip && vehicle.returnTrip && vehicle.returnTrip.price && vehicle.returnTrip.price.warnings) {
+          const shown = (vehicle.price && vehicle.price.warnings) || [];
+          vehicle.returnTrip.price.warnings
+            .filter((w) => !shown.includes(w))
+            .forEach((w) => card.appendChild(el("p", { class: "wnt-vehicle-warning", text: `Terugrit: ${w}` })));
         }
         if (vehicle.available) {
           card.appendChild(
@@ -2041,16 +2259,29 @@
       const onlinePayment = state.config.onlinePayment || {};
       const selectedVehicle =
         state.priceResult && (state.priceResult.vehicles || []).find((v) => v.vehicleId === state.selectedVehicleId);
-      const totalToPay = selectedVehicle && selectedVehicle.price ? selectedVehicle.price.totalEuro : null;
-      if (selectedVehicle && selectedVehicle.price && selectedVehicle.price.discount) {
-        const d = selectedVehicle.price.discount;
+      // Retourboeking (12 oktober 2026): één bedrag voor heen- en terugrit.
+      const roundTripTotal = state.roundTrip && selectedVehicle && selectedVehicle.roundTrip ? selectedVehicle.roundTrip : null;
+      if (roundTripTotal && state.returnDateTime) {
         container.appendChild(
-          el("p", { class: "wnt-hint", text: `Kortingscode ${formatDiscountCode(d.code)} toegepast: − ${euro(d.amountEuro)}.` })
+          el("p", { class: "wnt-hint", text: `Retour: heenrit ${formatDateTime(getEffectiveDateTime())} en terugrit ${formatDateTime(state.returnDateTime)}. U betaalt één keer voor beide ritten.` })
+        );
+      }
+      const totalToPay = roundTripTotal
+        ? roundTripTotal.totalEuro
+        : selectedVehicle && selectedVehicle.price
+          ? selectedVehicle.price.totalEuro
+          : null;
+      const appliedDiscount = roundTripTotal ? roundTripTotal.discount : selectedVehicle && selectedVehicle.price ? selectedVehicle.price.discount : null;
+      if (appliedDiscount) {
+        container.appendChild(
+          el("p", { class: "wnt-hint", text: `Kortingscode ${formatDiscountCode(appliedDiscount.code)} toegepast: − ${euro(appliedDiscount.amountEuro)}.` })
         );
       }
       const freeRide = totalToPay === 0;
       if (freeRide) {
-        container.appendChild(el("p", { class: "wnt-hint", text: "Met uw kortingscode is deze rit gratis. U hoeft niets te betalen." }));
+        container.appendChild(
+          el("p", { class: "wnt-hint", text: state.roundTrip ? "Met uw kortingscode zijn deze ritten gratis. U hoeft niets te betalen." : "Met uw kortingscode is deze rit gratis. U hoeft niets te betalen." })
+        );
       }
       if (onlinePayment.enabled && !freeRide) {
         const onlyIdeal = totalToPay !== null && totalToPay <= (onlinePayment.lowAmountThresholdEuro || 0);
@@ -2058,8 +2289,8 @@
           el("p", {
             class: "wnt-hint",
             text: onlyIdeal
-              ? "U betaalt direct online met iDEAL | Wero. Na het bevestigen gaat u naar de beveiligde betaalpagina; uw rit wordt vastgelegd zodra de betaling is gelukt."
-              : "U betaalt direct online. Na het bevestigen gaat u naar de beveiligde betaalpagina, waar u uw betaalmethode kiest; uw rit wordt vastgelegd zodra de betaling is gelukt.",
+              ? `U betaalt direct online met iDEAL | Wero. Na het bevestigen gaat u naar de beveiligde betaalpagina; ${state.roundTrip ? "uw ritten worden" : "uw rit wordt"} vastgelegd zodra de betaling is gelukt.`
+              : `U betaalt direct online. Na het bevestigen gaat u naar de beveiligde betaalpagina, waar u uw betaalmethode kiest; ${state.roundTrip ? "uw ritten worden" : "uw rit wordt"} vastgelegd zodra de betaling is gelukt.`,
           })
         );
       }
@@ -2162,15 +2393,16 @@
       };
     }
 
-    function renderSummaryView({ summary, rideNumber, reference, warnings, paid }) {
+    function renderSummaryView({ summary, rideNumber, reference, returnRideNumber, returnReference, warnings, paid }) {
       const container = el("div", { class: "wnt-step wnt-success" });
       const firstName = (summary.name || "").split(" ")[0];
-      container.appendChild(el("h2", { text: "Uw rit is geboekt" }));
+      const back = summary.returnTrip || null;
+      container.appendChild(el("h2", { text: back ? "Uw ritten zijn geboekt" : "Uw rit is geboekt" }));
       container.appendChild(
         el("p", {
           text: paid
-            ? `Bedankt${firstName ? ", " + firstName : ""}! Uw betaling is ontvangen en uw boeking is bevestigd. Hieronder vindt u de gegevens van uw rit.`
-            : `Bedankt${firstName ? ", " + firstName : ""}! Uw boeking is bevestigd. Hieronder vindt u de gegevens van uw rit.`,
+            ? `Bedankt${firstName ? ", " + firstName : ""}! Uw betaling is ontvangen en uw boeking is bevestigd. Hieronder vindt u de gegevens van ${back ? "uw ritten" : "uw rit"}.`
+            : `Bedankt${firstName ? ", " + firstName : ""}! Uw boeking is bevestigd. Hieronder vindt u de gegevens van ${back ? "uw ritten" : "uw rit"}.`,
         })
       );
 
@@ -2178,12 +2410,25 @@
       // Het ritnummer is het nummer dat ook in het taxiID-portaal staat, zodat een
       // centralist de rit kan opzoeken. Alleen als dat ontbreekt tonen we de korte
       // taxiID-referentie als terugval.
-      if (rideNumber) rows.push(["Ritnummer", rideNumber]);
+      // Bij een retourboeking heeft elke rit een eigen nummer.
+      if (back) {
+        if (rideNumber) rows.push(["Ritnummer heenrit", rideNumber]);
+        else if (reference) rows.push(["Referentie heenrit", reference]);
+        if (returnRideNumber) rows.push(["Ritnummer terugrit", returnRideNumber]);
+        else if (returnReference) rows.push(["Referentie terugrit", returnReference]);
+        if (summary.roundTripCode) rows.push(["Retourcode", summary.roundTripCode]);
+      } else if (rideNumber) rows.push(["Ritnummer", rideNumber]);
       else if (reference) rows.push(["Referentie", reference]);
-      rows.push(["Ophalen", summary.originAddress]);
-      rows.push(["Bestemming", summary.destinationAddress]);
-      rows.push(["Datum en tijd", formatLongDateTime(new Date(summary.dateTime))]);
-      if (summary.flightNumber) rows.push(["Vluchtnummer", summary.flightNumber]);
+      rows.push([back ? "Heenrit: ophalen" : "Ophalen", summary.originAddress]);
+      rows.push([back ? "Heenrit: bestemming" : "Bestemming", summary.destinationAddress]);
+      rows.push([back ? "Heenrit: datum en tijd" : "Datum en tijd", formatLongDateTime(new Date(summary.dateTime))]);
+      if (summary.flightNumber) rows.push([back ? "Heenrit: vluchtnummer" : "Vluchtnummer", summary.flightNumber]);
+      if (back) {
+        rows.push(["Terugrit: ophalen", back.originAddress]);
+        rows.push(["Terugrit: bestemming", back.destinationAddress]);
+        rows.push(["Terugrit: datum en tijd", formatLongDateTime(new Date(back.dateTime))]);
+        if (back.flightNumber) rows.push(["Terugrit: vluchtnummer", back.flightNumber]);
+      }
       rows.push(["Passagiers", String(summary.passengerCount)]);
       if (summary.vehicleName) rows.push(["Voertuig", [summary.vehicleName, summary.vehicleModel].filter(Boolean).join(" - ")]);
       rows.push(["Bagage", summary.baggage]);
@@ -2194,6 +2439,9 @@
       if (summary.discount) {
         rows.push(["Prijs zonder korting", euro(summary.discount.originalTotalEuro)]);
         rows.push([`Korting (${formatDiscountCode(summary.discount.code)})`, `− ${euro(summary.discount.amountEuro)}`]);
+      } else if (back && Number.isFinite(summary.outboundTotalEuro) && Number.isFinite(back.totalEuro)) {
+        rows.push(["Prijs heenrit", euro(summary.outboundTotalEuro)]);
+        rows.push(["Prijs terugrit", euro(back.totalEuro)]);
       }
       rows.push([paid ? "Betaald" : "Totaalprijs", euro(summary.totalEuro)]);
 
@@ -2209,7 +2457,7 @@
       // heeft een andere URL en opmaak dan onze website en wekt onrust bij
       // klanten, en annuleren door de klant is niet de bedoeling.
       container.appendChild(
-        el("p", { class: "wnt-hint", text: "Wilt u iets wijzigen aan uw rit? Neem dan telefonisch contact met ons op." })
+        el("p", { class: "wnt-hint", text: back ? "Wilt u iets wijzigen aan uw ritten? Neem dan telefonisch contact met ons op." : "Wilt u iets wijzigen aan uw rit? Neem dan telefonisch contact met ons op." })
       );
       // Interne mededeling over de nog niet gekoppelde online betaling hoort
       // niet bij de klant; de overige waarschuwingen blijven staan.
@@ -2241,6 +2489,8 @@
         summary: result.summary || buildSummaryFromState(result),
         rideNumber: result.rideNumber,
         reference: result.reference,
+        returnRideNumber: result.returnRideNumber,
+        returnReference: result.returnReference,
         warnings: result.warnings,
         paid: false,
       });
@@ -2268,7 +2518,15 @@
       const phoneHint = "Neem telefonisch contact met ons op als u vragen heeft.";
 
       if (status === "completed") {
-        return renderSummaryView({ summary: view.summary, rideNumber: view.rideNumber, reference: view.reference, warnings: view.warnings, paid: true });
+        return renderSummaryView({
+          summary: view.summary,
+          rideNumber: view.rideNumber,
+          reference: view.reference,
+          returnRideNumber: view.returnRideNumber,
+          returnReference: view.returnReference,
+          warnings: view.warnings,
+          paid: true,
+        });
       }
 
       if (status === "payment_failed") {

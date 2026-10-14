@@ -753,7 +753,6 @@
 /* Datum- en tijdvelden: op iOS zijn ze standaard breder dan hun vak en rekken ze
    de hele pagina op (zijwaarts scrollen). Eigen opmaak, nooit breder dan het vak. */
 .wnt-widget {
-  max-width: 100%;
   overflow-x: hidden;
 }
 

@@ -188,6 +188,7 @@
       dateTimeTouched: false,
       // ⓘ bij "Gekozen moment" uitgeklapt? (stap 1)
       dateInfoOpen: false,
+      arrivalInfoOpen: false,
       passengerCount: 1,
       childCount: 0,
       // hasBaggage: gevraagd op het eerste scherm (Hans, 19 augustus 2026,
@@ -2086,9 +2087,24 @@
         new Intl.DateTimeFormat("nl-NL", { dateStyle: "short", timeZone: "Europe/Amsterdam" }).format(new Date(pickup)) ===
           new Intl.DateTimeFormat("nl-NL", { dateStyle: "short", timeZone: "Europe/Amsterdam" }).format(new Date(iso));
       const when = sameDay ? formatClock(iso) : formatDayAndClock(iso);
+      // 14 oktober 2026 (Hans): de lange vrijwaring staat niet meer altijd in
+      // beeld maar achter een ⓘ-knop met het woord "Schatting!!!" (zoals de
+      // uitleg op stap 1). Het woord zelf blijft altijd zichtbaar naast de
+      // tijd, de volledige uitleg klapt inline open.
+      const infoButton = el("button", {
+        type: "button",
+        class: "wnt-info-button wnt-arrival-info-button",
+        title: "Uitleg over de verwachte aankomsttijd",
+        "aria-label": "Uitleg over de verwachte aankomsttijd",
+        "aria-expanded": state.arrivalInfoOpen ? "true" : "false",
+        onclick: () => {
+          state.arrivalInfoOpen = !state.arrivalInfoOpen;
+          render();
+        },
+      }, ["ⓘ Schatting!!!"]);
       return el("div", { class: "wnt-arrival" }, [
-        el("p", { class: "wnt-arrival-line" }, [label || "Verwachte aankomst: ", el("strong", { text: `ca. ${when}` })]),
-        withDisclaimer === false
+        el("p", { class: "wnt-arrival-line" }, [label || "Verwachte aankomst: ", el("strong", { text: `ca. ${when}` }), " ", infoButton]),
+        withDisclaimer === false || !state.arrivalInfoOpen
           ? null
           : el("p", { class: "wnt-arrival-disclaimer" }, [
               "Dit is een schatting op basis van de gebruikelijke drukte op het gekozen tijdstip. De werkelijke aankomsttijd kan afwijken, bijvoorbeeld door files, weer of wegwerkzaamheden. Aan deze schatting kunnen geen rechten worden ontleend. De prijs blijft ongewijzigd.",

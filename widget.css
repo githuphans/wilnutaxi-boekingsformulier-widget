@@ -882,3 +882,10 @@
   outline: 2px solid var(--wnt-error, #b3261e);
   outline-offset: 2px;
 }
+
+/* Verwachte aankomst: ⓘ Schatting-knop (14 oktober 2026) */
+.wnt-arrival-info-button {
+  font-size: 0.85em;
+  font-weight: 600;
+  padding: 0 0.1em;
+}

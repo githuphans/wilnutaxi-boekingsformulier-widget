@@ -137,6 +137,11 @@
 
   function createWidget(root) {
     const apiBase = (root.dataset.apiBase || "").replace(/\/$/, "");
+    // Algemene voorwaarden en privacy statement (14 oktober 2026). Standaard de
+    // pagina's op wilnutaxi.nl; te overschrijven met data-terms-url en
+    // data-privacy-url op het widget-element.
+    const termsUrl = root.dataset.termsUrl || "https://wilnutaxi.nl/algemene-voorwaarden/";
+    const privacyUrl = root.dataset.privacyUrl || "https://wilnutaxi.nl/privacy-policy/";
     if (!apiBase) {
       root.appendChild(
         el("p", { class: "wnt-error" }, ["Configuratiefout: data-api-base ontbreekt op de widget-container."])
@@ -235,6 +240,8 @@
       returnFlightManualOpen: false,
       // Meldingen bij velden (14 oktober 2026): sleutel -> { message, check? }.
       fieldErrors: {},
+      // Akkoord met de algemene voorwaarden en het privacy statement.
+      termsAccepted: false,
       returnTimeSteps: [],
       note: "",
       priceResult: null,
@@ -1075,6 +1082,8 @@
         destinationAddress: state.destination.text,
         passenger: { ...state.passenger, language: detectPageLanguageCode() },
         note: noteParts.join(" ") || undefined,
+        // Het vinkje bij "Gegevens"; de server eist dit en legt het tijdstip vast.
+        termsAccepted: state.termsAccepted === true,
         // Los van `note`: taxiID's Ride-schema heeft hier een eigen
         // `flightNumber`-veld voor (zie backend/taxiidClient.js). Alleen
         // relevant/ingevuld bij isAirportPickup() -- in alle andere
@@ -2538,6 +2547,34 @@
         );
       }
 
+      // Akkoord met de voorwaarden (14 oktober 2026): verplicht vinkje direct
+      // boven de knop, met links naar beide pagina's in een nieuw tabblad.
+      const termsField = el("div", { class: "wnt-field wnt-terms" });
+      termsField.appendChild(
+        el("label", { class: "wnt-terms-label", for: "wnt-terms" }, [
+          el("input", {
+            type: "checkbox",
+            id: "wnt-terms",
+            checked: state.termsAccepted ? "" : undefined,
+            ...invalidAttrs("terms"),
+            onchange: (e) => {
+              state.termsAccepted = e.target.checked;
+              if (e.target.checked) clearFieldError("terms", e.target);
+            },
+          }),
+          el("span", {}, [
+            "Ik ga akkoord met de ",
+            el("a", { href: termsUrl, target: "_blank", rel: "noopener noreferrer", text: "algemene voorwaarden" }),
+            " en heb het ",
+            el("a", { href: privacyUrl, target: "_blank", rel: "noopener noreferrer", text: "privacy statement" }),
+            " gelezen.",
+          ]),
+        ])
+      );
+      const termsErrorNode = fieldErrorNode("terms");
+      if (termsErrorNode) termsField.appendChild(termsErrorNode);
+      container.appendChild(termsField);
+
       const buttonRow = el("div", { class: "wnt-row wnt-button-row" });
       buttonRow.appendChild(
         el("button", {
@@ -2571,6 +2608,7 @@
             else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(p.email.trim())) errors.push(["email", "Dit e-mailadres lijkt niet te kloppen. Controleer het, bijvoorbeeld naam@voorbeeld.nl."]);
             if (!p.phoneNumber.trim()) errors.push(["phoneNumber", "Vul uw telefoonnummer in."]);
             else if (p.phoneNumber.replace(/\D/g, "").length < 6) errors.push(["phoneNumber", "Dit telefoonnummer lijkt te kort. Controleer het nummer."]);
+            if (!state.termsAccepted) errors.push(["terms", "Vink aan dat u akkoord gaat met de algemene voorwaarden en het privacy statement om te kunnen boeken."]);
             if (!showFieldErrors(errors)) return;
             submitBooking();
           },

@@ -851,3 +851,34 @@
 .wnt-stepper + .wnt-field:not(.wnt-stepper) {
   margin-top: 1.25rem;
 }
+
+/* Akkoord met de algemene voorwaarden en het privacy statement (14 oktober 2026) */
+.wnt-terms {
+  margin: 1.25rem 0 1rem;
+}
+
+.wnt-field .wnt-terms-label {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  font-weight: normal;
+  cursor: pointer;
+}
+
+.wnt-terms-label input[type="checkbox"] {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0.1rem 0 0;
+}
+
+.wnt-terms-label a {
+  color: var(--wnt-accent);
+  text-decoration: underline;
+}
+
+.wnt-widget .wnt-terms-label input.wnt-invalid {
+  box-shadow: none;
+  outline: 2px solid var(--wnt-error, #b3261e);
+  outline-offset: 2px;
+}

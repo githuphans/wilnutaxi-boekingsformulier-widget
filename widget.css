@@ -32,6 +32,7 @@
   --wnt-accent-contrast: #ffffff;
   --wnt-border: #d9d9d9;
   --wnt-bg-subtle: #f7f7f7;
+  --wnt-text: #1f2933;
   --wnt-text-muted: #666666;
   --wnt-error: #b3261e;
   --wnt-warning-bg: #fff4e0;
@@ -43,6 +44,10 @@
      widget niet per ongeluk een (veel) grotere of kleinere basisgrootte
      erft van de pagina eromheen. */
   font-size: 16px;
+
+  /* Eigen tekstkleur (14 oktober 2026): op de testpagina erfde het formulier
+     wit van de pagina eromheen (witte tekst op witte achtergrond). */
+  color: var(--wnt-text);
 
   max-width: 640px;
   margin: 0 auto;

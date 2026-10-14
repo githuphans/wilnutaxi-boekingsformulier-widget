@@ -134,7 +134,9 @@
     const node = document.createElement(tag);
     attrs = attrs || {};
     Object.keys(attrs).forEach((key) => {
-      if (key === "class") node.className = attrs[key];
+      if (key === "class") {
+        if (attrs[key]) node.className = attrs[key];
+      }
       else if (key === "text") node.textContent = attrs[key];
       else if (key === "html") node.innerHTML = attrs[key];
       else if (key.startsWith("on") && typeof attrs[key] === "function") {

@@ -57,6 +57,38 @@
 (function () {
   "use strict";
 
+  // Het adres van dit script, om widget.css uit dezelfde map te halen (en dus
+  // dezelfde versie). document.currentScript bestaat alleen tijdens het eerste
+  // uitvoeren van het script, daarom nu vastleggen.
+  const OWN_SCRIPT_SRC = document.currentScript && document.currentScript.src ? document.currentScript.src : "";
+
+  // 14 oktober 2026 (Hans): de opmaak ging verloren toen de <link>-regel voor
+  // widget.css uit de Elementor-tekstbewerker verdween (die haalt <link>-tags
+  // weg bij het opslaan). Daarom laadt de widget zijn opmaak nu zelf, uit
+  // dezelfde map en dezelfde versie als widget.js. Staat er al een verwijzing
+  // naar widget.css op de pagina, dan doet dit niets.
+  function ensureStylesheet(done) {
+    const already = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).some((l) => /widget\.css/.test(l.getAttribute("href") || ""));
+    if (already || !OWN_SCRIPT_SRC || !/widget\.js(\?.*)?$/.test(OWN_SCRIPT_SRC)) {
+      done();
+      return;
+    }
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      done();
+    };
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = OWN_SCRIPT_SRC.replace(/widget\.js(\?.*)?$/, "widget.css$1");
+    link.onload = finish;
+    link.onerror = finish;
+    document.head.appendChild(link);
+    // Nooit langer wachten dan 2 seconden op de opmaak.
+    setTimeout(finish, 2000);
+  }
+
   function euro(amount) {
     return new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(amount);
   }
@@ -3069,7 +3101,9 @@
   }
 
   function init() {
-    document.querySelectorAll("[data-wnt-widget]").forEach(createWidget);
+    ensureStylesheet(() => {
+      document.querySelectorAll("[data-wnt-widget]").forEach(createWidget);
+    });
   }
 
   if (document.readyState === "loading") {

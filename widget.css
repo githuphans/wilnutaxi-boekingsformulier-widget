@@ -889,3 +889,104 @@
   font-weight: 600;
   padding: 0 0.1em;
 }
+
+/*
+ * Bescherming tegen thema-stijlen voor knoppen (14 oktober 2026, Hans: bij
+ * het aanwijzen van een suggestie werd de tekst paars-wit en onleesbaar).
+ * Veel WordPress/Elementor-thema's zetten een eigen kleur en achtergrond op
+ * button:hover en button:focus (bijv. Hello Elementor: #c36 met witte tekst).
+ * Met het .wnt-widget-voorvoegsel is dit specifieker dan zulke themaregels,
+ * zodat de knoppen in elke toestand hun eigen kleuren houden.
+ */
+.wnt-widget.wnt-widget .wnt-suggestion,
+.wnt-widget.wnt-widget .wnt-suggestion:hover,
+.wnt-widget.wnt-widget .wnt-suggestion:focus,
+.wnt-widget.wnt-widget .wnt-suggestion:active {
+  color: inherit !important;
+  text-decoration: none;
+  box-shadow: none;
+}
+
+.wnt-widget.wnt-widget .wnt-suggestion {
+  background: none;
+  border: none;
+}
+
+.wnt-widget.wnt-widget .wnt-suggestion:hover,
+.wnt-widget.wnt-widget .wnt-suggestion:focus,
+.wnt-widget.wnt-widget .wnt-suggestion:active {
+  background: var(--wnt-bg-subtle) !important;
+}
+
+.wnt-widget.wnt-widget .wnt-stepper-button,
+.wnt-widget.wnt-widget .wnt-stepper-button:hover,
+.wnt-widget.wnt-widget .wnt-stepper-button:focus,
+.wnt-widget.wnt-widget .wnt-stepper-button:active {
+  color: inherit;
+  border-color: var(--wnt-border);
+}
+
+.wnt-widget.wnt-widget .wnt-stepper-button {
+  background: #fff;
+}
+
+.wnt-widget.wnt-widget .wnt-stepper-button:hover,
+.wnt-widget.wnt-widget .wnt-stepper-button:focus,
+.wnt-widget.wnt-widget .wnt-stepper-button:active {
+  background: var(--wnt-bg-subtle);
+}
+
+.wnt-widget.wnt-widget .wnt-info-button,
+.wnt-widget.wnt-widget .wnt-info-button:hover,
+.wnt-widget.wnt-widget .wnt-info-button:focus,
+.wnt-widget.wnt-widget .wnt-info-button:active,
+.wnt-widget.wnt-widget .wnt-link-button,
+.wnt-widget.wnt-widget .wnt-link-button:hover,
+.wnt-widget.wnt-widget .wnt-link-button:focus,
+.wnt-widget.wnt-widget .wnt-link-button:active {
+  background: none;
+  color: var(--wnt-accent);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.wnt-widget.wnt-widget .wnt-button-primary,
+.wnt-widget.wnt-widget .wnt-button-primary:hover,
+.wnt-widget.wnt-widget .wnt-button-primary:focus,
+.wnt-widget.wnt-widget .wnt-button-primary:active {
+  background: var(--wnt-accent);
+  color: var(--wnt-accent-contrast);
+  border-color: transparent;
+}
+
+.wnt-widget.wnt-widget .wnt-button-primary:hover:not(:disabled),
+.wnt-widget.wnt-widget .wnt-button-primary:focus-visible {
+  filter: brightness(0.92);
+}
+
+.wnt-widget.wnt-widget .wnt-button-secondary,
+.wnt-widget.wnt-widget .wnt-button-secondary:hover,
+.wnt-widget.wnt-widget .wnt-button-secondary:focus,
+.wnt-widget.wnt-widget .wnt-button-secondary:active {
+  color: inherit;
+  border-color: var(--wnt-border);
+}
+
+.wnt-widget.wnt-widget .wnt-button-secondary {
+  background: #fff;
+}
+
+.wnt-widget.wnt-widget .wnt-button-secondary:hover,
+.wnt-widget.wnt-widget .wnt-button-secondary:focus,
+.wnt-widget.wnt-widget .wnt-button-secondary:active {
+  background: var(--wnt-bg-subtle);
+}
+
+.wnt-widget.wnt-widget .wnt-button-danger,
+.wnt-widget.wnt-widget .wnt-button-danger:hover,
+.wnt-widget.wnt-widget .wnt-button-danger:focus,
+.wnt-widget.wnt-widget .wnt-button-danger:active {
+  background: var(--wnt-error);
+  border-color: var(--wnt-error);
+  color: #fff;
+}

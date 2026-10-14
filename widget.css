@@ -641,3 +641,109 @@
   font-size: 1.15em;
   font-weight: 700;
 }
+
+/* Compacte ritsamenvatting boven "Voertuig" en "Gegevens" (14 oktober 2026) */
+.wnt-trip-summary {
+  border: 1px solid var(--wnt-border);
+  border-radius: var(--wnt-radius);
+  background: var(--wnt-bg-subtle);
+  padding: 0.6rem 1rem;
+  margin: 0 0 1.25rem;
+  font-size: 0.95em;
+}
+
+.wnt-trip-summary-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.35rem;
+}
+
+.wnt-trip-summary-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.2rem 1rem;
+  margin: 0;
+}
+
+.wnt-trip-summary-list dt {
+  color: var(--wnt-text-muted);
+  margin: 0;
+}
+
+.wnt-trip-summary-list dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.wnt-trip-summary-line {
+  display: block;
+}
+
+/* Meldingen bij het veld, in plaats van een pop-up (14 oktober 2026) */
+.wnt-field-error {
+  margin: 0.35rem 0 0;
+  color: var(--wnt-error, #b3261e);
+  font-size: 0.9em;
+  font-weight: 600;
+}
+
+.wnt-widget input.wnt-invalid,
+.wnt-widget select.wnt-invalid,
+.wnt-widget textarea.wnt-invalid {
+  border-color: var(--wnt-error, #b3261e);
+  box-shadow: 0 0 0 1px var(--wnt-error, #b3261e);
+}
+
+/* UX-ronde 14 oktober 2026 */
+
+/* Losse uitleg bovenaan een stap krijgt lucht vóór het eerste veld */
+.wnt-step > .wnt-hint {
+  margin-bottom: 0.9rem;
+}
+
+/* Retourblok: duidelijk als één groep herkenbaar, met lucht tussen de onderdelen */
+.wnt-roundtrip-open {
+  border: 1px solid var(--wnt-border);
+  border-radius: var(--wnt-radius);
+  background: var(--wnt-bg-subtle);
+  padding: 0.75rem 1rem;
+}
+
+.wnt-roundtrip-open > .wnt-hint {
+  margin-bottom: 0.9rem;
+}
+
+/* "Wel beschikbaar vanaf" en de knop eronder niet tegen elkaar */
+.wnt-vehicle-next-available {
+  margin: 0.5em 0 0.75em;
+}
+
+.wnt-vehicle-next-available + .wnt-button {
+  margin-top: 0.25rem;
+}
+
+/* Volwassenen en kinderen naast elkaar, ook op een telefoon */
+.wnt-passengers-row > * {
+  flex: 1 1 140px;
+}
+
+@media (max-width: 480px) {
+  /* Stappenbalk op één regel: alleen de actieve stap met naam */
+  .wnt-progress {
+    flex-wrap: nowrap;
+    gap: 0.35rem;
+  }
+  .wnt-progress-step:not(.wnt-progress-step-active) .wnt-progress-label {
+    display: none;
+  }
+  /* Hoofdknop bovenaan, "Vorige" eronder, beide over de volle breedte */
+  .wnt-button-row {
+    flex-direction: column-reverse;
+  }
+  .wnt-button-row > * {
+    flex: none;
+    width: 100%;
+  }
+}

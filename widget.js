@@ -233,6 +233,8 @@
       returnFlightInfo: null,
       returnFlightManualLanding: "",
       returnFlightManualOpen: false,
+      // Meldingen bij velden (14 oktober 2026): sleutel -> { message, check? }.
+      fieldErrors: {},
       returnTimeSteps: [],
       note: "",
       priceResult: null,
@@ -1137,6 +1139,61 @@
 
     // ---- Rendering ----
 
+    // ---- Meldingen bij het veld (14 oktober 2026) ----
+    // In plaats van een browser-pop-up (alert) komt de melding direct onder het
+    // betreffende veld, met een rode rand; de pagina scrolt naar de eerste.
+    // Een melding verdwijnt zodra de klant het veld aanpast; bij meldingen die
+    // van de situatie afhangen (landing na ophaaltijd) controleert `check` of
+    // het probleem er nog is.
+    function fieldErrorMessage(key) {
+      const entry = state.fieldErrors[key];
+      if (!entry) return null;
+      if (entry.check && !entry.check()) return null;
+      return entry.message;
+    }
+
+    function fieldErrorNode(key) {
+      const message = fieldErrorMessage(key);
+      if (!message) return null;
+      return el("p", { class: "wnt-field-error", role: "alert", "data-wnt-error": key, text: message });
+    }
+
+    function invalidAttrs(key) {
+      return fieldErrorMessage(key) ? { class: "wnt-invalid", "aria-invalid": "true" } : {};
+    }
+
+    function clearFieldError(key, inputNode) {
+      if (!state.fieldErrors[key]) return;
+      delete state.fieldErrors[key];
+      const errorNode = document.querySelector(`[data-wnt-error="${key}"]`);
+      if (errorNode) errorNode.remove();
+      if (inputNode) {
+        inputNode.classList.remove("wnt-invalid");
+        inputNode.removeAttribute("aria-invalid");
+      }
+    }
+
+    // errors: lijst van [sleutel, bericht, check?]. Tekent opnieuw en gaat naar
+    // het eerste veld met een melding. Geen meldingen -> niets doen, true.
+    function showFieldErrors(errors) {
+      state.fieldErrors = {};
+      errors.forEach(([key, message, check]) => {
+        if (!state.fieldErrors[key]) state.fieldErrors[key] = { message, check };
+      });
+      if (!errors.length) return true;
+      render();
+      const target = document.querySelector("[data-wnt-error]");
+      if (target) {
+        const field = target.closest(".wnt-field") || target;
+        field.scrollIntoView({ block: "center", behavior: "smooth" });
+        // Niet de adresvelden focussen: dat opent meteen de suggestielijst
+        // over de melding heen.
+        const input = field.classList.contains("wnt-address-field") ? null : field.querySelector(".wnt-invalid");
+        if (input && typeof input.focus === "function") input.focus({ preventScroll: true });
+      }
+      return false;
+    }
+
     function renderAddressField(labelText, fieldKey, onFieldChange) {
       const field = state[fieldKey];
       const wrapper = el("div", { class: "wnt-field wnt-address-field" });
@@ -1150,6 +1207,7 @@
       let lastPlaceSuggestions = [];
 
       function selectSuggestion(text, poiId) {
+        clearFieldError(fieldKey, input);
         field.text = text;
         field.poiId = poiId || null;
         field.confirmed = true;
@@ -1235,7 +1293,7 @@
       function updateRecognized() {
         if (field.poiId) {
           const poi = findPoiById(field.poiId);
-          recognized.textContent = `✓ Herkend als ${poi.name} — vast tarief van toepassing indien beschikbaar.`;
+          recognized.textContent = `✓ Herkend als ${poi.name}. Waar mogelijk rekenen we een vast tarief.`;
           recognized.hidden = false;
         } else if (field.confirmed) {
           recognized.textContent = "✓ Adres bevestigd.";
@@ -1305,8 +1363,12 @@
         type: "text",
         value: field.text,
         placeholder: "Adres, plaatsnaam of bekende bestemming",
+        autocomplete: "off",
+        ...(fieldErrorMessage(fieldKey) ? { "aria-invalid": "true" } : {}),
+        class: fieldErrorMessage(fieldKey) ? "wnt-invalid" : undefined,
         oninput: (e) => {
           const hadPoiId = !!field.poiId;
+          clearFieldError(fieldKey, e.target);
           field.text = e.target.value;
           // Nieuwe tekst -> een eventuele oudere zone/bevestigingsvraag is
           // niet meer geldig (zie resolveAddressZoneAndPoiMatch).
@@ -1349,6 +1411,8 @@
       wrapper.appendChild(suggestions);
       wrapper.appendChild(recognized);
       wrapper.appendChild(poiConfirm);
+      const addressErrorNode = fieldErrorNode(fieldKey);
+      if (addressErrorNode) wrapper.appendChild(addressErrorNode);
 
       return wrapper;
     }
@@ -1497,8 +1561,10 @@
             type: "text",
             value: state.flightNumber,
             placeholder: "bijv. KL1234 of KL 1234",
+            ...invalidAttrs("flightNumber"),
             oninput: (e) => {
               state.flightNumber = e.target.value;
+              clearFieldError("flightNumber", e.target);
             },
             // Pas bij verlaten van het veld opzoeken (niet bij elke
             // toetsaanslag: bespaart aanroepen en laat de cursor met rust).
@@ -1509,13 +1575,15 @@
         );
         flightWrapper.appendChild(
           el("p", { class: "wnt-hint" }, [
-            "Zo kunnen we de vlucht volgen en op tijd klaarstaan, ook bij vertraging. U mag het vluchtnummer met of zonder spatie invullen: KL1234 of KL 1234.",
+            "Zo kunnen we de vlucht volgen en op tijd klaarstaan, ook bij vertraging.",
           ])
         );
         const flightInfoNode = renderFlightInfo();
         if (flightInfoNode) flightWrapper.appendChild(flightInfoNode);
         const manualLandingNode = renderManualLanding();
         if (manualLandingNode) flightWrapper.appendChild(manualLandingNode);
+        const flightErrorNode = fieldErrorNode("flightNumber");
+        if (flightErrorNode) flightWrapper.appendChild(flightErrorNode);
         container.appendChild(flightWrapper);
       }
 
@@ -1523,7 +1591,7 @@
       // Eén keer betalen voor heen- en terugrit. De terugrit gebruikt de
       // omgekeerde adressen, dezelfde passagiers, bagage en voertuigcategorie;
       // wie iets anders wil (andere bagage of route) boekt twee losse ritten.
-      const returnBox = el("div", { class: "wnt-field wnt-roundtrip" });
+      const returnBox = el("div", { class: "wnt-field wnt-roundtrip" + (state.roundTrip ? " wnt-roundtrip-open" : "") });
       returnBox.appendChild(
         el("label", { class: "wnt-radio-label", for: "wnt-round-trip" }, [
           el("input", {
@@ -1550,7 +1618,7 @@
         const returnRoute = el("p", { class: "wnt-hint" });
         const returnFlightBox = el("div", { class: "wnt-field", hidden: !isReturnAirportPickup() });
         updateReturnBlock = () => {
-          returnRoute.textContent = `Terugrit: van ${state.destination.text.trim() || "de bestemming"} naar ${state.origin.text.trim() || "het ophaaladres"}, met dezelfde passagiers, bagage en voertuigcategorie. Wilt u iets anders? Boek dan twee losse ritten.`;
+          returnRoute.textContent = `Terugrit: van ${state.destination.text.trim() || "de bestemming"} naar ${state.origin.text.trim() || "het ophaaladres"}, met dezelfde reizigers, bagage en voertuigcategorie. Iets anders nodig? Boek dan twee losse ritten.`;
           returnFlightBox.hidden = !isReturnAirportPickup();
         };
         updateReturnBlock();
@@ -1564,7 +1632,9 @@
             id: "wnt-return-datetime",
             value: state.returnDateTime ? toDateTimeLocalValue(state.returnDateTime) : "",
             min: toDateTimeLocalValue(getEffectiveDateTime()),
+            ...invalidAttrs("returnDateTime"),
             onchange: (e) => {
+              clearFieldError("returnDateTime", e.target);
               state.returnDateTime = e.target.value ? localInputValueToDate(e.target.value) : null;
               state.returnTimeSteps = [];
               if (state.returnDateTime) {
@@ -1588,6 +1658,8 @@
             : "Kies een vaste datum en tijd. Weet u dat nog niet? Boek de terugrit dan later als losse rit.",
         });
         returnDateField.appendChild(returnDateHint);
+        const returnDateErrorNode = fieldErrorNode("returnDateTime");
+        if (returnDateErrorNode) returnDateField.appendChild(returnDateErrorNode);
         returnBox.appendChild(returnDateField);
 
         returnFlightBox.appendChild(el("label", { text: "Vluchtnummer terugvlucht" }));
@@ -1597,8 +1669,10 @@
             id: "wnt-return-flight",
             value: state.returnFlightNumber,
             placeholder: "bijv. KL1234 of KL 1234",
+            ...invalidAttrs("returnFlight"),
             oninput: (e) => {
               state.returnFlightNumber = e.target.value;
+              clearFieldError("returnFlight", e.target);
             },
             // Pas bij verlaten van het veld opzoeken (zoals bij de heenrit).
             onchange: () => {
@@ -1607,19 +1681,21 @@
           })
         );
         returnFlightBox.appendChild(
-          el("p", { class: "wnt-hint", text: "De terugrit begint op de luchthaven. Zo kunnen we de vlucht volgen en op tijd klaarstaan, ook bij vertraging. U mag het vluchtnummer met of zonder spatie invullen." })
+          el("p", { class: "wnt-hint", text: "De terugrit begint op de luchthaven. Zo kunnen we de vlucht volgen en op tijd klaarstaan, ook bij vertraging." })
         );
         const returnFlightInfoNode = renderFlightInfo("return");
         if (returnFlightInfoNode) returnFlightBox.appendChild(returnFlightInfoNode);
         const returnManualLandingNode = renderManualLanding("return");
         if (returnManualLandingNode) returnFlightBox.appendChild(returnManualLandingNode);
+        const returnFlightErrorNode = fieldErrorNode("returnFlight");
+        if (returnFlightErrorNode) returnFlightBox.appendChild(returnFlightErrorNode);
         returnBox.appendChild(returnFlightBox);
       }
       container.appendChild(returnBox);
 
       const passengersRow = el("div", { class: "wnt-row wnt-passengers-row" });
-      passengersRow.appendChild(renderStepperField("Aantal volwassenen", state.passengerCount, 1, 8, (v) => (state.passengerCount = v)));
-      passengersRow.appendChild(renderStepperField("Aantal kinderen", state.childCount, 0, 8, (v) => (state.childCount = v)));
+      passengersRow.appendChild(renderStepperField("Volwassenen", state.passengerCount, 1, 8, (v) => (state.passengerCount = v)));
+      passengersRow.appendChild(renderStepperField("Kinderen", state.childCount, 0, 8, (v) => (state.childCount = v)));
       container.appendChild(passengersRow);
 
       // "Heeft u bagage?" (Hans, 19 augustus 2026, na zijn eigen eerste test
@@ -1678,69 +1754,60 @@
           text: state.hasBaggage === false ? (state.submitting ? "Bezig…" : "Bekijk prijzen") : "Verder naar bagage",
           disabled: state.submitting ? "" : undefined,
           onclick: () => {
-            if (!state.origin.text.trim() || !state.destination.text.trim()) {
-              alert("Vul zowel het ophaaladres als de bestemming in.");
-              return;
+            // Alle problemen tegelijk tonen, elk bij het eigen veld (14 oktober 2026).
+            const errors = [];
+            if (!state.origin.text.trim()) {
+              errors.push(["origin", "Vul het ophaaladres in."]);
+            } else if (!isFieldConfirmed(state.origin)) {
+              // Zie isFieldConfirmed hierboven: een adres moet uit de
+              // voorgestelde lijst gekozen zijn (of exact overeenkomen), zodat
+              // we zeker weten dat het een geldig, door Google herkend adres is.
+              errors.push(["origin", "Dit adres herkennen we niet. Typ het opnieuw en kies een adres uit de lijst die verschijnt."]);
             }
-            // Zie isFieldConfirmed hierboven: een adres moet uit de
-            // voorgestelde lijst gekozen zijn (of exact overeenkomen), zodat
-            // we zeker weten dat het een geldig, door Google herkend adres
-            // is — met een uitleg wat de klant moet doen, in plaats van een
-            // te summiere foutmelding (feedback Hans, 18 augustus 2026).
-            if (!isFieldConfirmed(state.origin)) {
-              alert(
-                `We kunnen "${state.origin.text}" niet herkennen als geldig adres. Begin opnieuw te typen in het ophaaladres-veld en kies één van de voorgestelde adressen uit de lijst die verschijnt.`
-              );
-              return;
-            }
-            if (!isFieldConfirmed(state.destination)) {
-              alert(
-                `We kunnen "${state.destination.text}" niet herkennen als geldige bestemming. Begin opnieuw te typen in het bestemmingsveld en kies één van de voorgestelde adressen uit de lijst die verschijnt.`
-              );
-              return;
+            if (!state.destination.text.trim()) {
+              errors.push(["destination", "Vul de bestemming in."]);
+            } else if (!isFieldConfirmed(state.destination)) {
+              errors.push(["destination", "Deze bestemming herkennen we niet. Typ hem opnieuw en kies een adres uit de lijst die verschijnt."]);
             }
             // Vluchtnummer verplicht bij een luchthaven-ophaalrit (Hans, 2
-            // oktober 2026, expliciete keuze: "Verplicht veld" i.p.v.
-            // optioneel) -- zelfde blokkerende patroon als de adrescontrole
-            // hierboven en de bagageband-vraag in renderBaggageStep.
+            // oktober 2026, expliciete keuze: "Verplicht veld" i.p.v. optioneel).
             if (isAirportPickup() && !state.flightNumber.trim()) {
-              alert(
-                "Vul het vluchtnummer in, zodat we de vlucht kunnen volgen en op tijd voor u klaarstaan."
-              );
-              return;
-            }
-            // Ophaaltijd vóór de landing: eerst aanpassen (rode knop) voordat
-            // de klant verder kan.
-            const conflictLanding = landingAfterPickup();
-            if (conflictLanding) {
-              alert(
-                `Uw vlucht landt om ${formatClock(conflictLanding.toISOString())}, na uw gekozen ophaaltijd. Klik op de rode knop "Ophaaltijd aanpassen aan de landing" of kies zelf een later ophaaltijdstip, dan kunt u verder.`
-              );
-              return;
+              errors.push(["flightNumber", "Vul uw vluchtnummer in, zodat we de vlucht kunnen volgen en op tijd voor u klaarstaan."]);
+            } else {
+              // Ophaaltijd vóór de landing: eerst aanpassen (rode knop) voordat
+              // de klant verder kan.
+              const conflictLanding = landingAfterPickup();
+              if (conflictLanding) {
+                errors.push([
+                  "flightNumber",
+                  `Uw vlucht landt om ${formatClock(conflictLanding.toISOString())}, na uw gekozen ophaaltijd. Gebruik de rode knop "Ophaaltijd aanpassen aan de landing" of kies zelf een later tijdstip.`,
+                  () => !!landingAfterPickup(),
+                ]);
+              }
             }
             // Retourrit (12 oktober 2026): vaste datum en tijd verplicht, later dan
             // de heenrit, en bij een terugrit vanaf een luchthaven het vluchtnummer.
             if (state.roundTrip) {
               if (!state.returnDateTime) {
-                alert("Kies de datum en tijd van de terugrit, of haal het vinkje bij 'Ook een retourrit boeken' weg.");
-                return;
-              }
-              if (state.returnDateTime.getTime() <= getEffectiveDateTime().getTime()) {
-                alert("De terugrit moet later zijn dan de heenrit. Controleer de datum en tijd van de terugrit.");
-                return;
+                errors.push(["returnDateTime", "Kies de datum en tijd van de terugrit, of haal het vinkje bij \"Ook een retourrit boeken\" weg."]);
+              } else if (state.returnDateTime.getTime() <= getEffectiveDateTime().getTime()) {
+                errors.push(["returnDateTime", "De terugrit moet later zijn dan de heenrit. Controleer de datum en tijd van de terugrit."]);
               }
               if (isReturnAirportPickup() && !state.returnFlightNumber.trim()) {
-                alert("Vul het vluchtnummer van uw terugvlucht in, zodat we de vlucht kunnen volgen en op tijd voor u klaarstaan.");
-                return;
-              }
-              const returnConflictLanding = landingAfterPickup("return");
-              if (returnConflictLanding) {
-                alert(
-                  `Uw terugvlucht landt om ${formatClock(returnConflictLanding.toISOString())}, na de gekozen ophaaltijd van de terugrit. Klik op de rode knop "Ophaaltijd aanpassen aan de landing" of kies zelf een later ophaaltijdstip, dan kunt u verder.`
-                );
-                return;
+                errors.push(["returnFlight", "Vul het vluchtnummer van uw terugvlucht in, zodat we de vlucht kunnen volgen en op tijd voor u klaarstaan."]);
+              } else {
+                const returnConflictLanding = landingAfterPickup("return");
+                if (returnConflictLanding) {
+                  errors.push([
+                    "returnFlight",
+                    `Uw terugvlucht landt om ${formatClock(returnConflictLanding.toISOString())}, na de gekozen ophaaltijd van de terugrit. Gebruik de rode knop "Ophaaltijd aanpassen aan de landing" of kies zelf een later tijdstip.`,
+                    () => !!landingAfterPickup("return"),
+                  ]);
+                }
               }
             }
+            if (!showFieldErrors(errors)) return;
+            state.fieldErrors = {};
             if (state.hasBaggage === false) {
               // Geen bagage-stap nodig. Extra zekerheid (naast de reset in
               // de onchange-handler hierboven, zie resetBaggageSelections):
@@ -1881,6 +1948,7 @@
               checked: state.airportBaggageAnswer === opt.value ? "" : undefined,
               onchange: () => {
                 state.airportBaggageAnswer = opt.value;
+                clearFieldError("airportBaggage");
               },
             }),
             " " + opt.label,
@@ -1890,6 +1958,8 @@
         airportWrapper.appendChild(
           el("p", { class: "wnt-hint" }, ["Zo kunnen we beter inschatten hoe laat u daadwerkelijk buiten staat."])
         );
+        const airportErrorNode = fieldErrorNode("airportBaggage");
+        if (airportErrorNode) airportWrapper.appendChild(airportErrorNode);
         container.appendChild(airportWrapper);
       }
 
@@ -1897,7 +1967,7 @@
         container.appendChild(el("p", { class: "wnt-error" }, [String(state.priceError)]));
       }
 
-      const buttonRow = el("div", { class: "wnt-row" });
+      const buttonRow = el("div", { class: "wnt-row wnt-button-row" });
       buttonRow.appendChild(
         el("button", {
           type: "button",
@@ -1926,9 +1996,9 @@
             // (isFieldConfirmed hierboven) blokkeren we nu het doorgaan
             // zolang deze vraag zichtbaar is én nog onbeantwoord.
             if (shouldAskAirportBaggageQuestion() && !state.airportBaggageAnswer) {
-              alert(
-                "Geef aan of u bagage van de band moet ophalen of alleen handbagage bij u heeft, zodat we uw wachttijd na aankomst goed kunnen inschatten."
-              );
+              showFieldErrors([
+                ["airportBaggage", "Kies hier uw antwoord, zodat we uw wachttijd na aankomst goed kunnen inschatten."],
+              ]);
               return;
             }
             fetchPrice();
@@ -2117,9 +2187,62 @@
       return el("div", { class: "wnt-vehicle-price-breakdown" }, lines);
     }
 
+    // 14 oktober 2026 (UX-ronde): een compacte samenvatting van wat de klant
+    // tot nu toe koos, boven "Voertuig" en "Gegevens", zodat hij steeds ziet
+    // wat hij boekt. `withVehicle`: ook het gekozen voertuig tonen (stap 4).
+    function describePassengers() {
+      const adults = state.passengerCount;
+      const kids = state.childCount;
+      const parts = [`${adults} ${adults === 1 ? "volwassene" : "volwassenen"}`];
+      if (kids > 0) parts.push(`${kids} ${kids === 1 ? "kind" : "kinderen"}`);
+      return parts.join(", ");
+    }
+
+    function renderTripSummary(withVehicle) {
+      const from = state.origin.text.trim();
+      const to = state.destination.text.trim();
+      const rows = [];
+      rows.push(["Van", from]);
+      rows.push(["Naar", to]);
+      if (state.roundTrip && state.returnDateTime) {
+        rows.push(["Heenrit", formatDateTime(getEffectiveDateTime())]);
+        rows.push(["Terugrit", formatDateTime(state.returnDateTime)]);
+      } else {
+        rows.push(["Wanneer", formatDateTime(getEffectiveDateTime())]);
+      }
+      rows.push(["Reizigers", describePassengers()]);
+      rows.push(["Bagage", state.hasBaggage === false ? "Geen bagage" : describeBaggageForSummary()]);
+      if (withVehicle) {
+        const vehicle = state.priceResult && (state.priceResult.vehicles || []).find((v) => v.vehicleId === state.selectedVehicleId);
+        if (vehicle) rows.push(["Voertuig", [vehicle.name, vehicle.model].filter(Boolean).join(" - ")]);
+      }
+      const list = el("dl", { class: "wnt-trip-summary-list" });
+      rows.forEach(([label, value]) => {
+        list.appendChild(el("dt", { text: label }));
+        const lines = Array.isArray(value) ? value : [value];
+        list.appendChild(el("dd", {}, lines.map((line) => el("span", { class: "wnt-trip-summary-line", text: line }))));
+      });
+      return el("div", { class: "wnt-trip-summary" }, [
+        el("div", { class: "wnt-trip-summary-head" }, [
+          el("strong", { text: state.roundTrip ? "Uw ritten" : "Uw rit" }),
+          el("button", {
+            type: "button",
+            class: "wnt-link-button",
+            text: "Wijzigen",
+            onclick: () => {
+              state.step = "ride";
+              render();
+            },
+          }),
+        ]),
+        list,
+      ]);
+    }
+
     function renderVehiclesStep() {
       const container = el("div", { class: "wnt-step" });
       container.appendChild(el("h2", { text: "Kies uw voertuig" }));
+      container.appendChild(renderTripSummary(false));
 
       if (state.priceResult && state.priceResult.route) {
         container.appendChild(
@@ -2313,27 +2436,46 @@
     function renderDetailsStep() {
       const container = el("div", { class: "wnt-step" });
       container.appendChild(el("h2", { text: "Uw gegevens" }));
+      container.appendChild(renderTripSummary(true));
 
-      function textField(labelText, key, type) {
+      // Invulhulp (14 oktober 2026): `autocomplete` laat de telefoon naam, e-mail
+      // en nummer zelf invullen, `inputmode` toont het juiste toetsenbord.
+      function textField(labelText, key, type, options) {
+        const { hint, ...extra } = options || {};
         const wrapper = el("div", { class: "wnt-field" });
-        wrapper.appendChild(el("label", { text: labelText }));
+        wrapper.appendChild(el("label", { text: labelText, for: `wnt-passenger-${key}` }));
         wrapper.appendChild(
           el("input", {
             type: type || "text",
+            id: `wnt-passenger-${key}`,
+            name: key,
             value: state.passenger[key],
             required: "",
+            ...extra,
+            ...invalidAttrs(key),
             oninput: (e) => {
               state.passenger[key] = e.target.value;
+              clearFieldError(key, e.target);
             },
           })
         );
+        if (hint) wrapper.appendChild(el("p", { class: "wnt-hint", text: hint }));
+        const errorNode = fieldErrorNode(key);
+        if (errorNode) wrapper.appendChild(errorNode);
         return wrapper;
       }
 
-      container.appendChild(textField("Voornaam", "firstName"));
-      container.appendChild(textField("Achternaam", "lastName"));
-      container.appendChild(textField("E-mailadres", "email", "email"));
-      container.appendChild(textField("Telefoonnummer", "phoneNumber", "tel"));
+      container.appendChild(textField("Voornaam", "firstName", "text", { autocomplete: "given-name" }));
+      container.appendChild(textField("Achternaam", "lastName", "text", { autocomplete: "family-name" }));
+      container.appendChild(textField("E-mailadres", "email", "email", { autocomplete: "email", inputmode: "email", autocapitalize: "off" }));
+      container.appendChild(
+        textField("Telefoonnummer", "phoneNumber", "tel", {
+          autocomplete: "tel",
+          inputmode: "tel",
+          placeholder: "bijv. 06 12345678",
+          hint: "Voor contact over uw rit. Een buitenlands nummer mag ook, met landcode (bijv. +49 151 1234567).",
+        })
+      );
 
       const noteWrapper = el("div", { class: "wnt-field" });
       noteWrapper.appendChild(el("label", { text: "Opmerking (optioneel)" }));
@@ -2362,7 +2504,7 @@
       const roundTripTotal = state.roundTrip && selectedVehicle && selectedVehicle.roundTrip ? selectedVehicle.roundTrip : null;
       if (roundTripTotal && state.returnDateTime) {
         container.appendChild(
-          el("p", { class: "wnt-hint", text: `Retour: heenrit ${formatDateTime(getEffectiveDateTime())} en terugrit ${formatDateTime(state.returnDateTime)}. U betaalt één keer voor beide ritten.` })
+          el("p", { class: "wnt-hint", text: "U betaalt één keer voor beide ritten." })
         );
       }
       const totalToPay = roundTripTotal
@@ -2394,7 +2536,7 @@
         );
       }
 
-      const buttonRow = el("div", { class: "wnt-row" });
+      const buttonRow = el("div", { class: "wnt-row wnt-button-row" });
       buttonRow.appendChild(
         el("button", {
           type: "button",
@@ -2420,10 +2562,14 @@
           disabled: state.submitting ? "" : undefined,
           onclick: () => {
             const p = state.passenger;
-            if (!p.firstName || !p.lastName || !p.email || !p.phoneNumber) {
-              alert("Vul alle gegevens in.");
-              return;
-            }
+            const errors = [];
+            if (!p.firstName.trim()) errors.push(["firstName", "Vul uw voornaam in."]);
+            if (!p.lastName.trim()) errors.push(["lastName", "Vul uw achternaam in."]);
+            if (!p.email.trim()) errors.push(["email", "Vul uw e-mailadres in."]);
+            else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(p.email.trim())) errors.push(["email", "Dit e-mailadres lijkt niet te kloppen. Controleer het, bijvoorbeeld naam@voorbeeld.nl."]);
+            if (!p.phoneNumber.trim()) errors.push(["phoneNumber", "Vul uw telefoonnummer in."]);
+            else if (p.phoneNumber.replace(/\D/g, "").length < 6) errors.push(["phoneNumber", "Dit telefoonnummer lijkt te kort. Controleer het nummer."]);
+            if (!showFieldErrors(errors)) return;
             submitBooking();
           },
         })
@@ -2756,7 +2902,8 @@
       steps.forEach((s, i) => {
         progress.appendChild(
           el("span", { class: "wnt-progress-step" + (activeStep === s ? " wnt-progress-step-active" : "") }, [
-            `${i + 1}. ${stepLabels[i]}`,
+            `${i + 1}.`,
+            el("span", { class: "wnt-progress-label", text: ` ${stepLabels[i]}` }),
           ])
         );
       });

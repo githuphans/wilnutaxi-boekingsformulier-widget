@@ -2097,14 +2097,28 @@
     }
 
     function renderAppliedSurcharges(price, prefix) {
-      const applied = ((price && price.appliedSurcharges) || []).filter(
-        (item) => item && item.name && Number.isFinite(item.amountEuro) && item.amountEuro > 0
+      // Een toeslag met een negatief bedrag (bijv. -15%) is in feite een
+      // korting: die tonen we apart als "inclusief korting" (14 oktober 2026,
+      // Hans: de korting werd verrekend maar er stond geen reden bij).
+      const all = ((price && price.appliedSurcharges) || []).filter(
+        (item) => item && item.name && Number.isFinite(item.amountEuro) && Math.abs(item.amountEuro) >= 0.005
       );
-      if (!applied.length) return null;
-      const parts = applied.map((item) => `${item.name} (+${euro(item.amountEuro)})`);
+      const surcharges = all.filter((item) => item.amountEuro > 0);
+      const reductions = all.filter((item) => item.amountEuro < 0);
+      if (!surcharges.length && !reductions.length) return null;
+      const sentences = [];
+      if (surcharges.length) {
+        const parts = surcharges.map((item) => `${item.name} (+${euro(item.amountEuro)})`);
+        sentences.push(`${surcharges.length === 1 ? "toeslag" : "toeslagen"}: ${parts.join(", ")}`);
+      }
+      if (reductions.length) {
+        const parts = reductions.map((item) => `${item.name} (\u2212${euro(Math.abs(item.amountEuro))})`);
+        sentences.push(`${reductions.length === 1 ? "korting" : "kortingen"}: ${parts.join(", ")}`);
+      }
+      const lead = prefix ? prefix + ": inclusief " : "Inclusief ";
       return el("p", {
         class: "wnt-vehicle-surcharges",
-        text: `${prefix ? prefix + ": inclusief" : "Inclusief"} ${applied.length === 1 ? "toeslag" : "toeslagen"}: ${parts.join(", ")}`,
+        text: lead + sentences.join(" \u00b7 inclusief "),
       });
     }
 

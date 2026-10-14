@@ -321,6 +321,29 @@
       return new Date(Date.now() + (getDefaultLeadMinutes() + widgetSafetyBufferMinutes) * 60 * 1000);
     }
 
+    // Woorden die voor de klant hetzelfde betekenen. Een zoekterm van minimaal
+    // drie tekens die (een deel van) een van deze woorden is, zoekt ook op de
+    // andere woorden uit dezelfde rij.
+    const SEARCH_SYNONYMS = [
+      ["vliegveld", "luchthaven", "airport", "vlieghaven"],
+      ["ziekenhuis", "hospital", "kliniek"],
+      ["station", "treinstation"],
+      ["cruise", "cruiseterminal", "cruisehaven"],
+    ];
+
+    function poiMatchesQuery(poi, query) {
+      const needle = String(query || "").trim().toLowerCase();
+      if (!needle) return true;
+      const variants = [needle];
+      if (needle.length >= 3) {
+        SEARCH_SYNONYMS.forEach((group) => {
+          if (group.some((word) => word.includes(needle))) variants.push(...group);
+        });
+      }
+      const haystack = `${poi.name} ${poi.category || ""}`.toLowerCase();
+      return variants.some((v) => haystack.includes(v));
+    }
+
     function matchPoiByText(text) {
       const needle = text.trim().toLowerCase();
       if (!needle) return null;
@@ -1235,13 +1258,10 @@
 
       function renderSuggestionList(query) {
         const pois = state.config.pois || [];
-        // Zoeken op naam én categorie (14 oktober 2026, Hans): "ziekenhuis"
-        // toont dan alle locaties met die categorie, ook als het woord niet in
-        // de naam staat.
-        const needle = query ? query.trim().toLowerCase() : "";
-        const poiMatches = needle
-          ? pois.filter((p) => p.name.toLowerCase().includes(needle) || String(p.category || "").toLowerCase().includes(needle))
-          : pois;
+        // Zoeken op naam, categorie en gelijkwaardige woorden (14 oktober 2026,
+        // Hans): "ziekenhuis" toont alle locaties met die categorie, en
+        // "vliegveld", "luchthaven" en "airport" worden als hetzelfde gezien.
+        const poiMatches = query ? pois.filter((p) => poiMatchesQuery(p, query)) : pois;
 
         suggestions.innerHTML = "";
         let hasContent = false;

@@ -1694,8 +1694,8 @@
       container.appendChild(returnBox);
 
       const passengersRow = el("div", { class: "wnt-row wnt-passengers-row" });
-      passengersRow.appendChild(renderStepperField("Volwassenen", state.passengerCount, 1, 8, (v) => (state.passengerCount = v)));
-      passengersRow.appendChild(renderStepperField("Kinderen", state.childCount, 0, 8, (v) => (state.childCount = v)));
+      passengersRow.appendChild(renderStepperField("Aantal volwassenen", state.passengerCount, 1, 8, (v) => (state.passengerCount = v)));
+      passengersRow.appendChild(renderStepperField("Aantal kinderen", state.childCount, 0, 8, (v) => (state.childCount = v)));
       container.appendChild(passengersRow);
 
       // "Heeft u bagage?" (Hans, 19 augustus 2026, na zijn eigen eerste test
@@ -1706,13 +1706,14 @@
       // zodat er niets verandert totdat de klant hier bewust "Nee" kiest.
       const baggageQuestionWrapper = el("div", { class: "wnt-field" });
       baggageQuestionWrapper.appendChild(el("label", { text: "Heeft u bagage die mee moet?" }));
+      const baggageSegments = el("div", { class: "wnt-segmented" });
       [
         { value: true, label: "Ja" },
         { value: false, label: "Nee" },
       ].forEach((opt) => {
         const radioId = `wnt-has-baggage-${opt.value}`;
-        baggageQuestionWrapper.appendChild(
-          el("label", { class: "wnt-radio-label", for: radioId }, [
+        baggageSegments.appendChild(
+          el("label", { class: "wnt-segment" + (state.hasBaggage === opt.value ? " wnt-segment-active" : ""), for: radioId }, [
             el("input", {
               type: "radio",
               id: radioId,
@@ -1741,10 +1742,11 @@
                 render();
               },
             }),
-            " " + opt.label,
+            opt.label,
           ])
         );
       });
+      baggageQuestionWrapper.appendChild(baggageSegments);
       container.appendChild(baggageQuestionWrapper);
 
       container.appendChild(
@@ -2870,6 +2872,9 @@
       return container;
     }
 
+    let lastRenderedStep = null;
+    const SCROLL_TOP_OFFSET_PX = 90;
+
     function render() {
       resetAirportOnlyState();
       root.innerHTML = "";
@@ -2918,6 +2923,16 @@
       else if (state.step === "payment") wrapper.appendChild(renderPaymentStep());
 
       root.appendChild(wrapper);
+
+      // Nieuwe stap: naar de bovenkant van het formulier scrollen (14 oktober
+      // 2026, Hans: bij doorklikken kwam hij niet altijd boven in het volgende
+      // scherm). Alleen als de bovenkant van het formulier boven het beeld
+      // staat; ruimte erboven voor een vaste kop van de website.
+      if (lastRenderedStep !== null && lastRenderedStep !== state.step) {
+        const top = root.getBoundingClientRect().top;
+        if (top < 0) window.scrollTo({ top: window.scrollY + top - SCROLL_TOP_OFFSET_PX, behavior: "auto" });
+      }
+      lastRenderedStep = state.step;
     }
 
     // Terug van de betaalpagina met de browser-terugknop: het formulier

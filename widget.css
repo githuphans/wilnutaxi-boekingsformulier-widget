@@ -747,3 +747,108 @@
     width: 100%;
   }
 }
+
+/* ---- Telefoon-ronde (14 oktober 2026, naar aanleiding van Hans' iPhone-test) ---- */
+
+/* Datum- en tijdvelden: op iOS zijn ze standaard breder dan hun vak en rekken ze
+   de hele pagina op (zijwaarts scrollen). Eigen opmaak, nooit breder dan het vak. */
+.wnt-widget {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.wnt-field input[type="datetime-local"],
+.wnt-flight-manual input[type="time"] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 2.8em;
+  background: #fff;
+  color: inherit;
+  text-align: left;
+}
+
+.wnt-field input[type="datetime-local"]::-webkit-date-and-time-value {
+  text-align: left;
+  min-width: 0;
+}
+
+/* Aantal volwassenen/kinderen en bagagetellers: naam links, teller rechts,
+   over de volle breedte (geen lege ruimte rechts) */
+.wnt-passengers-row {
+  display: block;
+}
+
+.wnt-passengers-row > * {
+  flex: none;
+}
+
+.wnt-stepper {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--wnt-border);
+  margin-bottom: 0;
+}
+
+.wnt-stepper label {
+  margin: 0;
+}
+
+/* Ja/Nee als twee gelijke keuzeknoppen naast elkaar */
+.wnt-segmented {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.wnt-segment {
+  flex: 1 1 0;
+  display: block;
+  text-align: center;
+  padding: 0.65em 0.5em;
+  border: 1px solid var(--wnt-border);
+  border-radius: var(--wnt-radius);
+  background: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  position: relative;
+}
+
+.wnt-segment input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.wnt-segment-active {
+  background: var(--wnt-accent);
+  border-color: var(--wnt-accent);
+  color: var(--wnt-accent-contrast);
+}
+
+.wnt-segment:focus-within {
+  outline: 2px solid var(--wnt-accent);
+  outline-offset: 2px;
+}
+
+.wnt-passengers-row {
+  margin-bottom: 1.25rem;
+}
+
+@media (max-width: 480px) {
+  /* Losse knoppen onder een stap over de volle breedte, niet links uitgelijnd */
+  .wnt-step > .wnt-button {
+    display: block;
+    width: 100%;
+  }
+}
+
+.wnt-stepper + .wnt-field:not(.wnt-stepper) {
+  margin-top: 1.25rem;
+}

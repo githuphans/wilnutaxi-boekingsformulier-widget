@@ -1235,7 +1235,13 @@
 
       function renderSuggestionList(query) {
         const pois = state.config.pois || [];
-        const poiMatches = query ? pois.filter((p) => p.name.toLowerCase().includes(query.toLowerCase())) : pois;
+        // Zoeken op naam én categorie (14 oktober 2026, Hans): "ziekenhuis"
+        // toont dan alle locaties met die categorie, ook als het woord niet in
+        // de naam staat.
+        const needle = query ? query.trim().toLowerCase() : "";
+        const poiMatches = needle
+          ? pois.filter((p) => p.name.toLowerCase().includes(needle) || String(p.category || "").toLowerCase().includes(needle))
+          : pois;
 
         suggestions.innerHTML = "";
         let hasContent = false;
@@ -2912,6 +2918,14 @@
 
     let lastRenderedStep = null;
     const SCROLL_TOP_OFFSET_PX = 90;
+    // Terug van de betaalpagina op een lange pagina (bijv. de homepage): de
+    // klant landt dan bovenaan de pagina en ziet zijn bevestiging niet. Eenmalig
+    // naar het formulier scrollen zodra de status getoond wordt.
+    let pendingReturnScroll = false;
+    function scrollWidgetIntoView() {
+      const top = root.getBoundingClientRect().top;
+      window.scrollTo({ top: window.scrollY + top - SCROLL_TOP_OFFSET_PX, behavior: "auto" });
+    }
 
     function render() {
       resetAirportOnlyState();
@@ -2971,6 +2985,16 @@
         if (top < 0) window.scrollTo({ top: window.scrollY + top - SCROLL_TOP_OFFSET_PX, behavior: "auto" });
       }
       lastRenderedStep = state.step;
+
+      if (pendingReturnScroll && state.step !== "loading") {
+        pendingReturnScroll = false;
+        scrollWidgetIntoView();
+        // De pagina eromheen (afbeeldingen, Elementor) kan na het laden nog
+        // verspringen: nogmaals uitlijnen zodra alles geladen is.
+        if (document.readyState !== "complete") {
+          window.addEventListener("load", () => scrollWidgetIntoView(), { once: true });
+        }
+      }
     }
 
     // Terug van de betaalpagina met de browser-terugknop: het formulier
@@ -2987,6 +3011,7 @@
     // het formulier zelf is dan niet meer nodig.
     const returnOrderId = getReturnOrderId();
     if (returnOrderId) {
+      pendingReturnScroll = true;
       startPaymentReturn(returnOrderId);
     } else {
       fetchConfig();

@@ -995,3 +995,33 @@
   border-color: var(--wnt-error);
   color: #fff;
 }
+
+/* 15 oktober 2026: "Bel mij terug" bij een volle categorie */
+.wnt-callback {
+  margin: 1.25rem 0;
+  padding: 1rem;
+  border: 1px solid var(--wnt-border);
+  border-radius: var(--wnt-radius);
+}
+
+.wnt-callback h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1.05em;
+}
+
+.wnt-callback .wnt-hint {
+  margin: 0.35rem 0 0.75rem;
+}
+
+.wnt-callback .wnt-field {
+  margin-bottom: 0.8rem;
+}
+
+.wnt-callback .wnt-error {
+  margin: 0.35rem 0 0.75rem;
+}
+
+.wnt-callback-done {
+  margin: 0;
+  font-weight: 600;
+}

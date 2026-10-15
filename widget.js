@@ -130,6 +130,23 @@
     return new Date(value);
   }
 
+  // 15 oktober 2026: willekeurige code per paginabezoek, alleen om bij de
+  // backend "gemiste aanvragen" (een volle categorie, daarna toch een ander
+  // tijdstip of niet geboekt) aan elkaar te kunnen koppelen. Wordt niet
+  // opgeslagen en bevat geen persoonsgegevens.
+  function newSessionId() {
+    const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let out = "";
+    try {
+      const bytes = new Uint8Array(16);
+      window.crypto.getRandomValues(bytes);
+      bytes.forEach((b) => (out += chars[b % chars.length]));
+    } catch (err) {
+      for (let i = 0; i < 16; i += 1) out += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return out;
+  }
+
   function el(tag, attrs, children) {
     const node = document.createElement(tag);
     attrs = attrs || {};
@@ -289,6 +306,9 @@
       discountInput: "",
       discountCode: "",
       discountOpen: false,
+      sessionId: newSessionId(),
+      // 15 oktober 2026: "Bel mij terug" bij een volle categorie, zie renderCallbackBox.
+      callback: { open: false, name: "", phone: "", note: "", submitting: false, error: null, done: false },
       discountApplied: null,
       discountError: null,
       passenger: { firstName: "", lastName: "", email: "", phoneNumber: "" },
@@ -970,6 +990,7 @@
         destinationAddress: state.destination.text,
         discountCode: sentDiscountCode || undefined,
         returnTrip: returnTripBody(false),
+        sessionId: state.sessionId,
       };
 
       try {
@@ -1162,6 +1183,7 @@
         // bij het boeken opnieuw en rekent de korting zelf uit.
         discountCode: state.discountApplied ? state.discountApplied.code : undefined,
         returnTrip: returnTripBody(true),
+        sessionId: state.sessionId,
       };
 
       try {
@@ -2340,6 +2362,129 @@
       ]);
     }
 
+    // ---- Terugbelverzoek bij een volle categorie (15 oktober 2026) ----
+    // Verschijnt onder de voertuigkaarten zodra er een categorie vol zit. De
+    // klant laat zelf naam en telefoonnummer achter; de backend mailt Hans.
+    function fullLegForCallback() {
+      const vehicles = (state.priceResult && state.priceResult.vehicles) || [];
+      if (vehicles.some((v) => v.capacity && v.capacity.full)) return "outbound";
+      if (state.roundTrip && vehicles.some((v) => v.returnTrip && v.returnTrip.capacity && v.returnTrip.capacity.full)) return "return";
+      return null;
+    }
+
+    async function submitCallback() {
+      const cb = state.callback;
+      const name = cb.name.trim();
+      const phone = cb.phone.trim();
+      if (!name) {
+        cb.error = "Vul uw naam in.";
+        render();
+        return;
+      }
+      if (!/^[0-9+()\-\s]{6,25}$/.test(phone)) {
+        cb.error = "Vul een geldig telefoonnummer in (alleen cijfers, spaties en + - ( ) ).";
+        render();
+        return;
+      }
+      const leg = fullLegForCallback() || "outbound";
+      const isReturn = leg === "return" && state.returnDateTime;
+      cb.submitting = true;
+      cb.error = null;
+      render();
+      try {
+        const response = await fetch(`${apiBase}/api/callback-request`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: state.sessionId,
+            name,
+            phoneNumber: phone,
+            note: (isReturn ? "Terugrit. " : "") + cb.note.trim() || undefined,
+            rideDateTime: (isReturn ? new Date(state.returnDateTime) : getEffectiveDateTime()).toISOString(),
+            originAddress: isReturn ? state.destination.text : state.origin.text,
+            destinationAddress: isReturn ? state.origin.text : state.destination.text,
+            passengerCount: totalPassengerCount(),
+          }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (response.ok) {
+          cb.done = true;
+          cb.open = false;
+        } else {
+          cb.error = data.error || "Het versturen is niet gelukt. Bel ons gerust even.";
+        }
+      } catch (err) {
+        cb.error = "Kon geen verbinding maken. Probeer het opnieuw, of bel ons even.";
+      }
+      cb.submitting = false;
+      render();
+    }
+
+    function renderCallbackBox() {
+      const cb = state.callback;
+      if (!fullLegForCallback()) return null;
+      const box = el("div", { class: "wnt-callback" });
+      if (cb.done) {
+        box.appendChild(el("p", { class: "wnt-callback-done" }, ["✓ Bedankt, wij hebben uw verzoek ontvangen en bellen u zo snel mogelijk terug."]));
+        return box;
+      }
+      box.appendChild(el("h3", { text: "Past het tijdstip niet in ons rooster?" }));
+      box.appendChild(el("p", { class: "wnt-hint" }, ["Wij denken graag met u mee. Laat uw telefoonnummer achter, dan bellen wij u terug om samen een oplossing te zoeken."]));
+      if (!cb.open) {
+        box.appendChild(
+          el("button", {
+            type: "button",
+            class: "wnt-button wnt-button-secondary",
+            text: "Bel mij terug",
+            onclick: () => {
+              cb.open = true;
+              render();
+            },
+          })
+        );
+        return box;
+      }
+      const field = (labelText, id, input) => {
+        const w = el("div", { class: "wnt-field" });
+        w.appendChild(el("label", { text: labelText, for: id }));
+        w.appendChild(input);
+        return w;
+      };
+      box.appendChild(
+        field(
+          "Uw naam",
+          "wnt-callback-name",
+          el("input", { type: "text", id: "wnt-callback-name", value: cb.name, maxlength: "80", autocomplete: "name", oninput: (e) => (cb.name = e.target.value) })
+        )
+      );
+      box.appendChild(
+        field(
+          "Uw telefoonnummer",
+          "wnt-callback-phone",
+          el("input", { type: "tel", id: "wnt-callback-phone", value: cb.phone, maxlength: "25", autocomplete: "tel", inputmode: "tel", oninput: (e) => (cb.phone = e.target.value) })
+        )
+      );
+      box.appendChild(
+        field(
+          "Opmerking (niet verplicht)",
+          "wnt-callback-note",
+          el("input", { type: "text", id: "wnt-callback-note", value: cb.note, maxlength: "300", oninput: (e) => (cb.note = e.target.value) })
+        )
+      );
+      box.appendChild(el("p", { class: "wnt-hint" }, ["Wij gebruiken uw gegevens alleen om u terug te bellen en bewaren ze maximaal 30 dagen."]));
+      if (cb.error) box.appendChild(el("p", { class: "wnt-error", text: cb.error }));
+      box.appendChild(
+        el("button", {
+          type: "button",
+          class: "wnt-button wnt-button-primary",
+          text: cb.submitting ? "Bezig…" : "Verstuur terugbelverzoek",
+          disabled: cb.submitting ? "" : undefined,
+          onclick: submitCallback,
+        })
+      );
+      return box;
+    }
+
     function renderVehiclesStep() {
       const container = el("div", { class: "wnt-step" });
       container.appendChild(el("h2", { text: "Kies uw voertuig" }));
@@ -2514,6 +2659,9 @@
         grid.appendChild(card);
       });
       container.appendChild(grid);
+
+      const callbackBox = renderCallbackBox();
+      if (callbackBox) container.appendChild(callbackBox);
 
       container.appendChild(
         el("button", {

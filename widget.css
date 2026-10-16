@@ -1025,3 +1025,38 @@
   margin: 0;
   font-weight: 600;
 }
+
+/* Taalknop NL | EN (alleen zichtbaar met data-lang-switch="on", 16 oktober 2026) */
+.wnt-widget.wnt-widget .wnt-lang-switch {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin: 0 0 10px;
+}
+
+.wnt-widget.wnt-widget .wnt-lang-button,
+.wnt-widget.wnt-widget .wnt-lang-button:hover,
+.wnt-widget.wnt-widget .wnt-lang-button:focus,
+.wnt-widget.wnt-widget .wnt-lang-button:active {
+  appearance: none;
+  min-width: 40px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 0.8em;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--wnt-text-muted);
+  background: #fff;
+  border: 1px solid var(--wnt-border);
+  border-radius: 999px;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.wnt-widget.wnt-widget .wnt-lang-button.wnt-lang-button-active,
+.wnt-widget.wnt-widget .wnt-lang-button.wnt-lang-button-active:hover,
+.wnt-widget.wnt-widget .wnt-lang-button.wnt-lang-button-active:focus {
+  color: var(--wnt-accent-contrast);
+  background: var(--wnt-accent);
+  border-color: var(--wnt-accent);
+}

@@ -193,6 +193,7 @@
     "opvouwbare rolstoel": "Folding wheelchair",
     "inklapbare scootmobiel": "Foldable mobility scooter",
     "opvouwbare kinderwagen": "Folding pushchair",
+    zitverhoger: "Child booster seat",
     "1x skiset": "1x Ski set",
     "2x skisets": "2x Ski sets",
     "1x golfset": "1x Golf set",
@@ -221,7 +222,11 @@
   function surchargeLabel(name) {
     if (LANG === "nl") return name;
     const m = /^Bijzondere bagage: (.+)$/.exec(String(name || ""));
-    return m ? `Special luggage: ${label(m[1])}` : label(name);
+    if (m) return `Special luggage: ${label(m[1])}`;
+    // "Zitverhoger" / "Zitverhoger (2x)" (toeslag van de server, 18 oktober 2026)
+    const seat = /^Zitverhoger(?: \((\d+)x\))?$/.exec(String(name || ""));
+    if (seat) return seat[1] ? `Child booster seat (${seat[1]}x)` : "Child booster seat";
+    return label(name);
   }
 
   // "2x Grote ruimbagage, Rollator" / "Geen bagage" (samenvatting van de server)
@@ -240,6 +245,8 @@
   // redenen bij een niet beschikbaar voertuig), vertaald naar het Engels. Een
   // melding die hier niet bij staat, blijft Nederlands.
   const TM_EXACT = {
+    "Het aantal zitverhogers kan niet hoger zijn dan het aantal kinderen.": "The number of booster seats cannot be higher than the number of children.",
+    "Een zitverhoger is niet beschikbaar. Ververs de pagina en kies opnieuw.": "A booster seat is not available. Please refresh the page and choose again.",
     "Ongeldige aanvraag": "Invalid request",
     "Ongeldige boekingsaanvraag": "Invalid booking request",
     "Deze rit valt buiten ons werkgebied voor online boekingen. Neem telefonisch contact met ons op, dan maken we samen een offerte.":
@@ -294,6 +301,7 @@
   };
 
   const TM_PATTERNS = [
+    [/^Er kunnen maximaal (\d+) zitverhogers per rit worden aangevraagd\.$/, (m) => `A maximum of ${m[1]} booster seats can be requested per trip.`],
     [
       /^Voor het gekozen tijdstip is er helaas geen capaciteit meer beschikbaar in de categorie "(.+)"\.$/,
       (m) => `Unfortunately there is no capacity left for the chosen time in the category "${label(m[1])}".`,
@@ -516,6 +524,8 @@
       arrivalInfoOpen: false,
       passengerCount: 1,
       childCount: 0,
+      // 18 oktober 2026: gevraagde zitverhogers (0 t/m maximaal 2, nooit meer dan het aantal kinderen).
+      childSeatCount: 0,
       // hasBaggage: gevraagd op het eerste scherm (Hans, 19 augustus 2026,
       // na zijn eigen eerste test). Standaard `true` (dus standaard nog
       // steeds de bagage-stap tonen, zoals nu al) totdat de klant expliciet
@@ -757,6 +767,22 @@
     // zien).
     function totalPassengerCount() {
       return state.passengerCount + state.childCount;
+    }
+
+    // Zitverhoger voor kinderen (18 oktober 2026). De instelling (aan/uit,
+    // prijs per stuk, maximum) komt uit /api/config; de keuze is er alleen als
+    // er kinderen bij de rit zijn en nooit hoger dan het aantal kinderen. De
+    // server controleert dit opnieuw en rekent de prijs zelf uit.
+    function childSeatConfig() {
+      const c = state.config && state.config.childSeat;
+      return c && c.enabled && c.maxCount > 0 ? c : null;
+    }
+    function maxChildSeats() {
+      const c = childSeatConfig();
+      return c ? Math.min(c.maxCount, state.childCount) : 0;
+    }
+    function effectiveChildSeatCount() {
+      return Math.min(state.childSeatCount, maxChildSeats());
     }
 
     // 30 september 2026 (Hans): de taal bij een boeking kwam bij taxiID
@@ -1265,6 +1291,7 @@
       const body = {
         passengerCount: totalPassengerCount(),
         childCount: state.childCount,
+        childSeatCount: effectiveChildSeatCount(),
         baggageCounts: state.baggageCounts,
         specialBaggageId: state.specialBaggageId,
         direction: meta.direction,
@@ -1440,6 +1467,7 @@
         vehicleId: state.selectedVehicleId,
         passengerCount: totalPassengerCount(),
         childCount: state.childCount,
+        childSeatCount: effectiveChildSeatCount(),
         baggageCounts: state.baggageCounts,
         specialBaggageId: state.specialBaggageId,
         direction: meta.direction,
@@ -2102,6 +2130,43 @@
       passengersRow.appendChild(renderStepperField(t("Aantal kinderen", "Number of children"), state.childCount, 0, 8, (v) => (state.childCount = v)));
       container.appendChild(passengersRow);
 
+      // Zitverhoger (18 oktober 2026): alleen als er kinderen bij de rit zijn.
+      const seatMax = maxChildSeats();
+      if (seatMax > 0) {
+        const seatConfig = childSeatConfig();
+        state.childSeatCount = Math.min(state.childSeatCount, seatMax);
+        const seatWrapper = el("div", { class: "wnt-field" });
+        seatWrapper.appendChild(el("label", { for: "wnt-child-seats", text: t("Zitverhoger voor kinderen", "Booster seat for children") }));
+        const seatSelect = el("select", {
+          id: "wnt-child-seats",
+          onchange: (e) => {
+            state.childSeatCount = Number(e.target.value) || 0;
+          },
+        });
+        for (let n = 0; n <= seatMax; n += 1) {
+          const optionLabel =
+            n === 0
+              ? t("Geen zitverhoger", "No booster seat")
+              : n === 1
+                ? t(`1 zitverhoger (+${euro(seatConfig.priceEuro)})`, `1 booster seat (+${euro(seatConfig.priceEuro)})`)
+                : t(`${n} zitverhogers (+${euro(seatConfig.priceEuro * n)})`, `${n} booster seats (+${euro(seatConfig.priceEuro * n)})`);
+          seatSelect.appendChild(el("option", { value: String(n), selected: n === state.childSeatCount ? "" : undefined }, [optionLabel]));
+        }
+        seatWrapper.appendChild(seatSelect);
+        seatWrapper.appendChild(
+          el("p", {
+            class: "wnt-hint",
+            text: t(
+              `Voor het comfort en de veiligheid van uw kinderen. ${euro(seatConfig.priceEuro)} per zitverhoger, maximaal ${seatConfig.maxCount} per rit.`,
+              `For the comfort and safety of your children. ${euro(seatConfig.priceEuro)} per booster seat, maximum ${seatConfig.maxCount} per trip.`
+            ),
+          })
+        );
+        container.appendChild(seatWrapper);
+      } else {
+        state.childSeatCount = 0;
+      }
+
       // "Heeft u bagage?" (Hans, 19 augustus 2026, na zijn eigen eerste test
       // met de widget): zo hoeven klanten zonder bagage niet eerst door de
       // hele bagage-stap heen, met alles op "0 stuks"/"geen" -- die stap
@@ -2660,6 +2725,10 @@
       }
       rows.push([t("Reizigers", "Travellers"), describePassengers()]);
       rows.push([t("Bagage", "Luggage"), state.hasBaggage === false ? t("Geen bagage", "No luggage") : describeBaggageForSummary()]);
+      if (effectiveChildSeatCount() > 0) {
+        const seats = effectiveChildSeatCount();
+        rows.push([t("Zitverhoger", "Booster seat"), seats === 1 ? t("1 zitverhoger", "1 booster seat") : t(`${seats} zitverhogers`, `${seats} booster seats`)]);
+      }
       if (withVehicle) {
         const vehicle = state.priceResult && (state.priceResult.vehicles || []).find((v) => v.vehicleId === state.selectedVehicleId);
         if (vehicle) rows.push([t("Voertuig", "Vehicle"), [label(vehicle.name), vehicle.model].filter(Boolean).join(" - ")]);
@@ -3245,6 +3314,7 @@
         vehicleName: vehicle ? vehicle.name : null,
         vehicleModel: vehicle ? vehicle.model : null,
         baggage: describeBaggageForSummary(),
+        childSeatCount: effectiveChildSeatCount(),
         note: state.note || null,
         name: `${p.firstName} ${p.lastName}`.trim(),
         phoneNumber: p.phoneNumber,
@@ -3301,6 +3371,9 @@
       rows.push([t("Passagiers", "Passengers"), String(summary.passengerCount)]);
       if (summary.vehicleName) rows.push([t("Voertuig", "Vehicle"), [label(summary.vehicleName), summary.vehicleModel].filter(Boolean).join(" - ")]);
       rows.push([t("Bagage", "Luggage"), translateBaggageSummary(summary.baggage)]);
+      if (summary.childSeatCount > 0) {
+        rows.push([t("Zitverhoger", "Booster seat"), summary.childSeatCount === 1 ? t("1 zitverhoger", "1 booster seat") : t(`${summary.childSeatCount} zitverhogers`, `${summary.childSeatCount} booster seats`)]);
+      }
       if (summary.note) rows.push([t("Opmerking", "Remark"), summary.note]);
       rows.push([t("Naam", "Name"), summary.name]);
       rows.push([t("Telefoonnummer", "Phone number"), summary.phoneNumber]);

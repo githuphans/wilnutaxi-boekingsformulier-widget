@@ -457,6 +457,12 @@
     // gaat de link naar dezelfde pagina als bij Nederlands.
     const termsUrlNl = root.dataset.termsUrl || "https://wilnutaxi.nl/algemene-voorwaarden/";
     const privacyUrlNl = root.dataset.privacyUrl || "https://wilnutaxi.nl/privacy-policy/";
+    // Herkomst van de boeking (18 oktober 2026): op een landingspagina voor
+    // Google Ads of Facebook zet je data-origin="Airport EHV - adwords" (de
+    // naam zoals die in taxiID bij "Oorsprong" moet staan) op het
+    // widget-element. De waarde gaat bij het boeken mee en komt in taxiID in
+    // het veld "Oorsprong". Zonder data-origin verandert er niets.
+    const bookingOrigin = (root.dataset.origin || "").replace(/\s+/g, " ").trim().slice(0, 60);
     const termsUrlEn = root.dataset.termsUrlEn || termsUrlNl;
     const privacyUrlEn = root.dataset.privacyUrlEn || privacyUrlNl;
     const termsUrl = () => (LANG === "nl" ? termsUrlNl : termsUrlEn);
@@ -1469,6 +1475,7 @@
         discountCode: state.discountApplied ? state.discountApplied.code : undefined,
         returnTrip: returnTripBody(true),
         sessionId: state.sessionId,
+        bookingOrigin: bookingOrigin || undefined,
       };
 
       try {

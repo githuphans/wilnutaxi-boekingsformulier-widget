@@ -286,6 +286,7 @@
     "Deze kortingscode kennen we niet. Controleer de code en probeer het opnieuw.": "We do not recognise this discount code. Please check the code and try again.",
     "Deze kortingscode is niet meer actief.": "This discount code is no longer active.",
     "Deze kortingscode is al gebruikt.": "This discount code has already been used.",
+    "Deze kortingscode geldt alleen voor ritten van of naar een luchthaven.": "This discount code only applies to trips to or from an airport.",
     "Deze kortingscode wordt op dit moment gebruikt voor een boeking die nog niet betaald is. Probeer het over een paar minuten opnieuw.":
       "This discount code is currently being used for a booking that has not been paid yet. Please try again in a few minutes.",
     "Te veel mislukte pogingen met een kortingscode. Probeer het over een kwartier opnieuw.":

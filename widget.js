@@ -344,6 +344,8 @@
       /^Inhoudsmaat voor bijzondere bagage "(.+)" is nog niet geconfigureerd; dit item is niet meegeteld in de volumeberekening\.$/,
       (m) => `The volume of special luggage "${label(m[1])}" has not been set up yet; this item was not counted in the volume calculation.`,
     ],
+    [/^Deze kortingscode geldt voor ritten vanaf (.+)\.$/, (m) => `This discount code is valid for trips from ${m[1]}.`],
+    [/^Deze kortingscode geldt voor ritten tot en met (.+)\.$/, (m) => `This discount code is valid for trips up to and including ${m[1]}.`],
     [/^Deze kortingscode is pas geldig vanaf (.+)\.$/, (m) => `This discount code is only valid from ${m[1]}.`],
     [/^Deze kortingscode is verlopen \(geldig tot en met (.+)\)\.$/, (m) => `This discount code has expired (valid until and including ${m[1]}).`],
   ];

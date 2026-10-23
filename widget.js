@@ -1323,8 +1323,13 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        const data = await response.json();
-        if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        if (data === null) {
+          state.priceError = t(
+            "De prijsberekening is op dit moment tijdelijk niet beschikbaar. Probeer het over enkele minuten opnieuw, of bel ons even.",
+            "The price calculation is temporarily unavailable. Please try again in a few minutes, or give us a call."
+          );
+        } else if (!response.ok) {
           state.priceError = data.details
             ? `${tm(data.error)}: ${JSON.stringify(data.details)}`
             : tm(data.error) || `HTTP ${response.status}`;
@@ -1518,8 +1523,15 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        const data = await response.json();
-        if (!response.ok && data.discountError) {
+        // Een storing onderweg (bv. een foutpagina in plaats van een JSON-antwoord) mag
+        // nooit als "geen verbinding" getoond worden: de server heeft dan wél geantwoord.
+        const data = await response.json().catch(() => null);
+        if (data === null) {
+          state.bookError = t(
+            "De boeking kon op dit moment niet verwerkt worden door een tijdelijke storing. Probeer het over enkele minuten opnieuw, of bel ons even, dan regelen we het telefonisch.",
+            "The booking could not be processed right now due to a temporary problem. Please try again in a few minutes, or give us a call and we will arrange it by phone."
+          );
+        } else if (!response.ok && data.discountError) {
           // De code geldt niet meer (bv. net door iemand anders gebruikt):
           // terug naar de voertuigkeuze met de normale prijzen en de reden.
           state.discountApplied = null;

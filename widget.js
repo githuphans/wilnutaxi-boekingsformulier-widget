@@ -550,6 +550,8 @@
       // Los van `note` omdat taxiID's eigen Ride-schema hier een
       // toegewijd veld voor heeft (`flightNumber`, zie taxiidClient.js
       // backend-kant), geen vrije tekst.
+      flightAirportPoiId: null,
+      returnFlightAirportPoiId: null,
       flightNumber: "",
       // 5 oktober 2026: resultaat van de vluchtopzoeking (GET
       // /api/flight-lookup), { key, status, flights } -- alleen informatief.
@@ -1842,7 +1844,7 @@
         ...(fieldErrorMessage(fieldKey) ? { "aria-invalid": "true" } : {}),
         class: fieldErrorMessage(fieldKey) ? "wnt-invalid" : undefined,
         oninput: (e) => {
-          const hadPoiId = !!field.poiId;
+          const hadPoiId = field.poiId;
           clearFieldError(fieldKey, e.target);
           field.text = e.target.value;
           // Nieuwe tekst -> een eventuele oudere zone/bevestigingsvraag is
@@ -1874,7 +1876,7 @@
           // toevallig ergens anders iets een render triggerde. Fix:
           // alleen bij een daadwerkelijke overgang (poiId gezet/ontzet),
           // niet bij elke toetsaanslag, alsnog een volledige render().
-          if (!!field.poiId !== hadPoiId) {
+          if (field.poiId !== hadPoiId) {
             render();
           }
         },
@@ -1900,6 +1902,28 @@
     // overgang luchthaven <-> geen luchthaven triggert altijd een render()
     // (zie renderAddressField), dus dit loopt nooit achter.
     function resetAirportOnlyState() {
+      // Wissel van de ene luchthaven naar een andere (Hans, 23 oktober 2026):
+      // het ingevulde vluchtnummer hoorde bij de eerste luchthaven en mag niet
+      // ongemerkt blijven staan. Dan vragen we het opnieuw.
+      const originAirportId = isAirportPickup() ? state.origin.poiId : null;
+      if (state.flightAirportPoiId && originAirportId && state.flightAirportPoiId !== originAirportId) {
+        state.flightNumber = "";
+        state.flightInfo = null;
+        state.flightManualLanding = "";
+        state.flightManualOpen = false;
+        delete state.fieldErrors.flightNumber;
+      }
+      state.flightAirportPoiId = originAirportId;
+      // Zelfde voor de terugvlucht: de terugrit start bij de bestemming.
+      const returnAirportId = isReturnAirportPickup() ? state.destination.poiId : null;
+      if (state.returnFlightAirportPoiId && state.returnFlightAirportPoiId !== returnAirportId) {
+        state.returnFlightNumber = "";
+        state.returnFlightInfo = null;
+        state.returnFlightManualLanding = "";
+        state.returnFlightManualOpen = false;
+        delete state.fieldErrors.returnFlight;
+      }
+      state.returnFlightAirportPoiId = returnAirportId;
       if (isAirportPickup()) return;
       state.flightNumber = "";
       state.flightInfo = null;

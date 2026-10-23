@@ -1589,6 +1589,45 @@
       return fieldErrorMessage(key) ? { class: "wnt-invalid", "aria-invalid": "true" } : {};
     }
 
+    // Terugrit vóór (of gelijk aan) de heenrit. De browser-eigen "min" op het
+    // datumveld werkt op desktop-Chrome wel, maar iOS Safari negeert die: daar
+    // kon de klant een eerdere terugrit kiezen. Daarom controleren we zelf,
+    // meteen na het kiezen (en ook als de heenrit daarna nog wijzigt), en
+    // blokkeert "Verder" in elk geval (zie de controle bij die knop).
+    function returnBeforeOutbound() {
+      return !!state.returnDateTime && state.returnDateTime.getTime() <= getEffectiveDateTime().getTime();
+    }
+
+    function returnOrderMessage() {
+      return t(
+        "De terugrit moet later zijn dan de heenrit. Controleer de datum en tijd van de terugrit.",
+        "The return trip must be later than the outbound trip. Please check the date and time of the return trip."
+      );
+    }
+
+    // Zet de melding (of haalt hem weg) zonder het hele formulier opnieuw te
+    // tekenen, zodat een geopende datumkiezer op iOS niet verstoord wordt.
+    // inputNode is het terugrit-datumveld als dat op het scherm staat.
+    function syncReturnOrderError(inputNode) {
+      const current = state.fieldErrors.returnDateTime;
+      const isOrderError = current && current.check === returnBeforeOutbound;
+      if (current && !isOrderError) {
+        // Een andere melding (bijv. "Kies de datum…"): alleen weghalen als er nu een datum is.
+        if (state.returnDateTime) clearFieldError("returnDateTime", inputNode);
+        else return;
+      } else if (isOrderError) {
+        clearFieldError("returnDateTime", inputNode);
+      }
+      if (!returnBeforeOutbound()) return;
+      state.fieldErrors.returnDateTime = { message: returnOrderMessage(), check: returnBeforeOutbound };
+      if (inputNode && inputNode.parentNode) {
+        inputNode.classList.add("wnt-invalid");
+        inputNode.setAttribute("aria-invalid", "true");
+        const node = fieldErrorNode("returnDateTime");
+        if (node) inputNode.parentNode.appendChild(node);
+      }
+    }
+
     function clearFieldError(key, inputNode) {
       if (!state.fieldErrors[key]) return;
       delete state.fieldErrors[key];
@@ -1939,6 +1978,8 @@
               state.timeSteps = [];
               state.dateTimeTouched = true;
             }
+            // Ligt de al gekozen terugrit nu vóór de heenrit? Dan meteen melden.
+            syncReturnOrderError(null);
             render();
             // Andere ophaaldag: de vluchtopzoeking geldt per datum.
             if (isAirportPickup() && state.flightNumber.trim()) lookupFlightInfo();
@@ -2078,9 +2119,9 @@
             min: toDateTimeLocalValue(getEffectiveDateTime()),
             ...invalidAttrs("returnDateTime"),
             onchange: (e) => {
-              clearFieldError("returnDateTime", e.target);
               state.returnDateTime = e.target.value ? localInputValueToDate(e.target.value) : null;
               state.returnTimeSteps = [];
+              syncReturnOrderError(e.target);
               if (state.returnDateTime) {
                 returnDateHint.textContent = t(`Gekozen: ${formatDateTime(state.returnDateTime)}`, `Chosen: ${formatDateTime(state.returnDateTime)}`);
               } else {

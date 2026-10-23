@@ -305,6 +305,10 @@
   };
 
   const TM_PATTERNS = [
+    [
+      /^Een rit moet minimaal (\d+) minuten van tevoren geboekt worden\. Kies een later tijdstip, of neem telefonisch contact met ons op\.$/,
+      (m) => `A trip must be booked at least ${m[1]} minutes in advance. Please choose a later time, or call us.`,
+    ],
     [/^Er kunnen maximaal (\d+) zitverhogers per rit worden aangevraagd\.$/, (m) => `A maximum of ${m[1]} booster seats can be requested per trip.`],
     [
       /^Voor het gekozen tijdstip is er helaas geen capaciteit meer beschikbaar in de categorie "(.+)"\.$/,
@@ -1600,6 +1604,28 @@
       return !!state.returnDateTime && state.returnDateTime.getTime() <= getEffectiveDateTime().getTime();
     }
 
+    // Minimale tijd vooraf (23 oktober 2026, Hans): de backend weigert een rit
+    // die te kort voor vertrek geboekt wordt; hier melden we dat meteen. iOS
+    // negeert de "min" van het datumveld, dus controleren we ook zelf.
+    function getMinimumLeadMinutes() {
+      const rule = state.config && state.config.advanceBookingRule;
+      return (rule && Number(rule.minimumLeadTimeMinutes)) || 0;
+    }
+
+    function outboundTooSoon() {
+      const minutes = getMinimumLeadMinutes();
+      if (!minutes) return false;
+      return getEffectiveDateTime().getTime() < Date.now() + minutes * 60 * 1000;
+    }
+
+    function tooSoonMessage() {
+      const minutes = getMinimumLeadMinutes();
+      return t(
+        `Een rit moet minimaal ${minutes} minuten van tevoren geboekt worden. Kies een later tijdstip, of neem telefonisch contact met ons op.`,
+        `A trip must be booked at least ${minutes} minutes in advance. Please choose a later time, or call us.`
+      );
+    }
+
     function returnOrderMessage() {
       return t(
         "De terugrit moet later zijn dan de heenrit. Controleer de datum en tijd van de terugrit.",
@@ -1996,12 +2022,17 @@
         el("input", {
           type: "datetime-local",
           value: toDateTimeLocalValue(getEffectiveDateTime()),
+          min: getMinimumLeadMinutes() ? toDateTimeLocalValue(new Date(Date.now() + getMinimumLeadMinutes() * 60 * 1000)) : undefined,
+          ...invalidAttrs("dateTime"),
           onchange: (e) => {
             if (e.target.value) {
               state.dateTime = localInputValueToDate(e.target.value);
               state.timeSteps = [];
               state.dateTimeTouched = true;
             }
+            // Te kort van tevoren? Meteen melden; anders een eerdere melding weghalen.
+            delete state.fieldErrors.dateTime;
+            if (outboundTooSoon()) state.fieldErrors.dateTime = { message: tooSoonMessage(), check: outboundTooSoon };
             // Ligt de al gekozen terugrit nu vóór de heenrit? Dan meteen melden.
             syncReturnOrderError(null);
             render();
@@ -2010,6 +2041,8 @@
           },
         })
       );
+      const dateErrorNode = fieldErrorNode("dateTime");
+      if (dateErrorNode) dateWrapper.appendChild(dateErrorNode);
       // 10 oktober 2026 (Hans, om ruimte te besparen): compacte regel met een
       // ⓘ-knop die de uitleg over de 24 uur inline openklapt (geen pop-up:
       // werkt ook in een iframe/mobiel zonder extra "ok"-knop).
@@ -2341,6 +2374,9 @@
                   () => !!landingAfterPickup(),
                 ]);
               }
+            }
+            if (outboundTooSoon()) {
+              errors.push(["dateTime", tooSoonMessage(), outboundTooSoon]);
             }
             // Retourrit (12 oktober 2026): vaste datum en tijd verplicht, later dan
             // de heenrit, en bij een terugrit vanaf een luchthaven het vluchtnummer.

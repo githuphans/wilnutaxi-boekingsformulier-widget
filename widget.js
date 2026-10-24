@@ -306,6 +306,10 @@
 
   const TM_PATTERNS = [
     [
+      /^Een rit die tussen (\d\d:\d\d) en (\d\d:\d\d) vertrekt, kunt u niet binnen 24 uur van tevoren online boeken\. Kies een ander tijdstip, of neem telefonisch contact met ons op\.$/,
+      (m) => `A trip departing between ${m[1]} and ${m[2]} cannot be booked online within 24 hours in advance. Please choose another time, or call us.`,
+    ],
+    [
       /^Een rit moet minimaal (\d+) minuten van tevoren geboekt worden\. Kies een later tijdstip, of neem telefonisch contact met ons op\.$/,
       (m) => `A trip must be booked at least ${m[1]} minutes in advance. Please choose a later time, or call us.`,
     ],
@@ -1618,6 +1622,36 @@
       return getEffectiveDateTime().getTime() < Date.now() + minutes * 60 * 1000;
     }
 
+    // Nachtblokkade (24 oktober 2026, Hans): binnen 24 uur geen ritten met een
+    // ophaaltijd in de nacht (kantoor dicht). Tijden in Nederlandse tijd,
+    // zoals op de server.
+    function nightBlocked(date) {
+      const rule = state.config && state.config.advanceBookingRule;
+      if (!rule || !rule.nightBlockEnabled || !date) return false;
+      const leadMs = (Number(rule.defaultLeadMinutes) || Number(rule.defaultLeadTimeMinutes) || 1440) * 60 * 1000;
+      if (date.getTime() - Date.now() >= leadMs) return false;
+      const start = rule.nightBlockStartTime || "22:00";
+      const end = rule.nightBlockEndTime || "07:00";
+      if (start === end) return false;
+      const at = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Amsterdam", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date);
+      return start < end ? at >= start && at < end : at >= start || at < end;
+    }
+
+    function nightBlockMessage() {
+      const rule = state.config.advanceBookingRule;
+      return t(
+        `Een rit die tussen ${rule.nightBlockStartTime} en ${rule.nightBlockEndTime} vertrekt, kunt u niet binnen 24 uur van tevoren online boeken. Kies een ander tijdstip, of neem telefonisch contact met ons op.`,
+        `A trip departing between ${rule.nightBlockStartTime} and ${rule.nightBlockEndTime} cannot be booked online within 24 hours in advance. Please choose another time, or call us.`
+      );
+    }
+
+    // Eerste probleem met de gekozen ophaaltijd, of null.
+    function outboundProblem() {
+      if (outboundTooSoon()) return tooSoonMessage();
+      if (nightBlocked(getEffectiveDateTime())) return nightBlockMessage();
+      return null;
+    }
+
     function tooSoonMessage() {
       const minutes = getMinimumLeadMinutes();
       return t(
@@ -2032,7 +2066,7 @@
             }
             // Te kort van tevoren? Meteen melden; anders een eerdere melding weghalen.
             delete state.fieldErrors.dateTime;
-            if (outboundTooSoon()) state.fieldErrors.dateTime = { message: tooSoonMessage(), check: outboundTooSoon };
+            if (outboundProblem()) state.fieldErrors.dateTime = { message: outboundProblem(), check: () => !!outboundProblem() };
             // Ligt de al gekozen terugrit nu vóór de heenrit? Dan meteen melden.
             syncReturnOrderError(null);
             render();
@@ -2375,8 +2409,8 @@
                 ]);
               }
             }
-            if (outboundTooSoon()) {
-              errors.push(["dateTime", tooSoonMessage(), outboundTooSoon]);
+            if (outboundProblem()) {
+              errors.push(["dateTime", outboundProblem(), () => !!outboundProblem()]);
             }
             // Retourrit (12 oktober 2026): vaste datum en tijd verplicht, later dan
             // de heenrit, en bij een terugrit vanaf een luchthaven het vluchtnummer.
@@ -2385,6 +2419,9 @@
                 errors.push(["returnDateTime", t("Kies de datum en tijd van de terugrit, of haal het vinkje bij \"Ook een retourrit boeken\" weg.", "Choose the date and time of the return trip, or untick \"Also book a return trip\".")]);
               } else if (state.returnDateTime.getTime() <= getEffectiveDateTime().getTime()) {
                 errors.push(["returnDateTime", t("De terugrit moet later zijn dan de heenrit. Controleer de datum en tijd van de terugrit.", "The return trip must be later than the outbound trip. Please check the date and time of the return trip.")]);
+              }
+              if (state.returnDateTime && nightBlocked(state.returnDateTime) && !errors.some((e) => e[0] === "returnDateTime")) {
+                errors.push(["returnDateTime", nightBlockMessage()]);
               }
               if (isReturnAirportPickup() && !state.returnFlightNumber.trim()) {
                 errors.push(["returnFlight", t("Vul het vluchtnummer van uw terugvlucht in, zodat we de vlucht kunnen volgen en op tijd voor u klaarstaan.", "Please enter the flight number of your return flight, so we can follow the flight and be ready on time for you.")]);

@@ -3813,6 +3813,15 @@
           : state.step === "redirecting"
             ? "details"
             : state.step;
+      // Testomgeving (29 oktober 2026): de backend meldt testEnvironment in /api/config.
+      if (state.config && state.config.testEnvironment) {
+        wrapper.appendChild(
+          el("p", {
+            class: "wnt-test-banner",
+            text: t("TESTOMGEVING: dit is niet het echte boekingsformulier. Er wordt geen taxi voor u geboekt.", "TEST ENVIRONMENT: this is not the real booking form. No taxi will be booked for you."),
+          })
+        );
+      }
       const progress = el("div", { class: "wnt-progress" });
       steps.forEach((s, i) => {
         progress.appendChild(

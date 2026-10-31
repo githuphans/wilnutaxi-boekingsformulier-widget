@@ -138,6 +138,18 @@
   color: var(--wnt-accent);
 }
 
+/* Testomgeving: oranje balk bovenaan het formulier */
+.wnt-test-banner {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  background: #fff3cd;
+  color: #7a4a00;
+  border: 2px solid #e0a800;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.9em;
+}
+
 .wnt-error {
   color: var(--wnt-error);
   font-size: 0.9em;

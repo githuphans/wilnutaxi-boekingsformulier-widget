@@ -228,6 +228,7 @@
     if (m) return `Special luggage: ${label(m[1])}`;
     // "Zitverhoger" / "Zitverhoger (2x)" (toeslag van de server, 18 oktober 2026)
     const seat = /^Zitverhoger(?: \((\d+)x\))?$/.exec(String(name || ""));
+    if (name === "Tussenstop (omweg)") return "Stopover (detour)";
     if (seat) return seat[1] ? `Child booster seat (${seat[1]}x)` : "Child booster seat";
     return label(name);
   }
@@ -302,9 +303,17 @@
     "De aanvraag is te groot om te verwerken.": "The request is too large to process.",
     "De aanvraag is geen geldige JSON.": "The request is not valid.",
     "Er ging iets onverwacht mis.": "Something went wrong unexpectedly.",
+    "Een tussenstop is op dit moment niet beschikbaar. Neem telefonisch contact met ons op.":
+      "A stopover is not available at the moment. Please call us.",
+    "Route met tussenstop kon niet bepaald worden via Google Maps": "The route with the stopover could not be determined. Please try again.",
+    "Route met tussenstop van de terugrit kon niet bepaald worden via Google Maps": "The route with the stopover of the return trip could not be determined. Please try again.",
   };
 
   const TM_PATTERNS = [
+    [
+      /^Deze tussenstop ligt te ver van de route \(meer dan (\d+) km omweg\)\. Neem telefonisch contact met ons op, dan maken we samen een offerte\.$/,
+      (m) => "This stopover is too far from the route (more than " + m[1] + " km detour). Please call us and we will prepare a quote together.",
+    ],
     [
       /^Een rit die tussen (\d\d:\d\d) en (\d\d:\d\d) vertrekt, kunt u niet binnen 24 uur van tevoren online boeken\. Kies een ander tijdstip, of neem telefonisch contact met ons op\.$/,
       (m) => `A trip departing between ${m[1]} and ${m[2]} cannot be booked online within 24 hours in advance. Please choose another time, or call us.`,
@@ -595,6 +604,16 @@
       // Akkoord met de algemene voorwaarden en het privacy statement.
       termsAccepted: false,
       returnTimeSteps: [],
+      // 5 november 2026: tussenstop (één per rit). Een veld bestaat altijd, maar
+      // wordt pas getoond als de klant "Tussenstop toevoegen" kiest. De
+      // terugrit heeft een eigen tussenstop; returnSwapped = de klant heeft de
+      // volgorde van de terugrit omgedraaid (tip over een goedkopere volgorde).
+      stop: { text: "", poiId: null, confirmed: false, zone: null, poiConfirmPending: null },
+      stopOpen: false,
+      returnStop: { text: "", poiId: null, confirmed: false, zone: null, poiConfirmPending: null },
+      returnStopOpen: false,
+      returnStopDeclined: false,
+      returnSwapped: false,
       note: "",
       priceResult: null,
       priceError: null,
@@ -649,6 +668,188 @@
       // dit terug op de oude gok -- fail-safe, nooit erger dan voorheen.
       if (field.zone) return field.zone;
       return guessZoneFromAddress(field.text);
+    }
+
+    // ---- Tussenstop (5 november 2026) ----
+    function stopoverEnabled() {
+      return Boolean(state.config && state.config.stopover && state.config.stopover.enabled);
+    }
+    // Een tussenstop telt pas mee zodra er een adres is ingevuld.
+    function stopActive() {
+      return stopoverEnabled() && state.stopOpen && state.stop.text.trim() !== "";
+    }
+    function returnStopActive() {
+      return stopoverEnabled() && state.roundTrip && state.returnStopOpen && state.returnStop.text.trim() !== "";
+    }
+    function emptyStopField() {
+      return { text: "", poiId: null, confirmed: false, zone: null, poiConfirmPending: null };
+    }
+    function stopBody(field) {
+      return { stopAddress: field.text.trim(), stopZone: resolveZone(field) || undefined };
+    }
+    function shortAddress(text) {
+      return String(text || "").split(",").slice(0, 2).join(",").trim();
+    }
+    // Wisselt de tussenstop (index 1) met het eerste of laatste adres.
+    function applyStopSwap(seq, swapEnd) {
+      const out = seq.slice();
+      const i = swapEnd === "origin" ? 0 : 2;
+      const tmp = out[i];
+      out[i] = out[1];
+      out[1] = tmp;
+      return out;
+    }
+    // De volgorde van de adressen van een rit: eerst ophalen, dan de tussenstop, dan de bestemming.
+    function stopSequence(leg) {
+      if (leg === "return") {
+        const seq = [state.destination.text, state.returnStop.text, state.origin.text];
+        const info = state.priceResult && state.priceResult.returnRoute && state.priceResult.returnRoute.stopover;
+        return state.returnSwapped && info ? applyStopSwap(seq, info.swapEnd) : seq;
+      }
+      return [state.origin.text, state.stop.text, state.destination.text];
+    }
+    // De knop bij de volgorde-tip. Heenrit: de velden wisselen echt van plaats.
+    // Terugrit: de terugrit wordt apart omgedraaid (de heenrit blijft ongemoeid).
+    function swapStopOrder(leg, swapEnd) {
+      if (leg === "return") {
+        state.returnSwapped = !state.returnSwapped;
+      } else {
+        const key = swapEnd === "origin" ? "origin" : "destination";
+        const swapped = state[key];
+        state[key] = state.stop;
+        state.stop = swapped;
+        state.returnSwapped = false;
+      }
+      fetchPrice();
+    }
+    function removeStop(leg) {
+      if (leg === "return") {
+        state.returnStopOpen = false;
+        state.returnStop = emptyStopField();
+        state.returnStopDeclined = true;
+        state.returnSwapped = false;
+        delete state.fieldErrors.returnStop;
+      } else {
+        state.stopOpen = false;
+        state.stop = emptyStopField();
+        state.returnSwapped = false;
+        delete state.fieldErrors.stop;
+      }
+      render();
+    }
+    function renderStopToggle(leg) {
+      const isReturn = leg === "return";
+      return el("div", { class: "wnt-stopover-toggle" }, [
+        el("button", {
+          type: "button",
+          class: "wnt-link-button",
+          text: isReturn ? t("+ Tussenstop op de terugrit", "+ Add a stopover on the return trip") : t("+ Tussenstop toevoegen", "+ Add a stopover"),
+          onclick: () => {
+            if (isReturn) state.returnStopOpen = true;
+            else state.stopOpen = true;
+            render();
+          },
+        }),
+      ]);
+    }
+    function renderStopBlock(leg, onChange) {
+      const isReturn = leg === "return";
+      const box = el("div", { class: "wnt-stopover" });
+      box.appendChild(
+        renderAddressField(
+          isReturn ? t("Tussenstop terugrit", "Stopover on the return trip") : t("Tussenstop (onderweg)", "Stopover (on the way)"),
+          isReturn ? "returnStop" : "stop",
+          onChange,
+          { noPoi: true }
+        )
+      );
+      box.appendChild(
+        el("p", { class: "wnt-hint" }, [
+          t(
+            "Bijvoorbeeld voor een medereiziger die op een ander adres woont. Voor de omweg rekenen we een toeslag; die ziet u bij de prijzen.",
+            "For example for a fellow traveller who lives at a different address. We charge a surcharge for the detour; you will see it with the prices."
+          ),
+        ])
+      );
+      box.appendChild(
+        el("button", {
+          type: "button",
+          class: "wnt-link-button",
+          text: t("Tussenstop verwijderen", "Remove stopover"),
+          onclick: () => removeStop(leg),
+        })
+      );
+      return box;
+    }
+    // In het retourblok: de heenrit-stop voorstellen, of een eigen stop toevoegen.
+    function renderReturnStopBlock(onChange) {
+      if (!stopoverEnabled()) return null;
+      if (state.returnStopOpen) return renderStopBlock("return", onChange);
+      if (stopActive() && !state.returnStopDeclined) {
+        const short = shortAddress(state.stop.text);
+        return el("div", { class: "wnt-stopover-proposal" }, [
+          el("p", { class: "wnt-hint" }, [
+            t(
+              "U heeft een tussenstop bij de heenrit (" + short + "). Ook op de terugrit?",
+              "You have a stopover on the outbound trip (" + short + "). Also on the return trip?"
+            ),
+          ]),
+          el("div", { class: "wnt-poi-confirm-buttons" }, [
+            el("button", {
+              type: "button",
+              class: "wnt-button wnt-button-primary wnt-button-small",
+              text: t("Ja, zelfde tussenstop", "Yes, same stopover"),
+              onclick: () => {
+                state.returnStop = Object.assign({}, state.stop);
+                state.returnStopOpen = true;
+                state.returnSwapped = false;
+                render();
+              },
+            }),
+            el("button", {
+              type: "button",
+              class: "wnt-button wnt-button-secondary wnt-button-small",
+              text: t("Nee", "No"),
+              onclick: () => {
+                state.returnStopDeclined = true;
+                render();
+              },
+            }),
+          ]),
+        ]);
+      }
+      return renderStopToggle("return");
+    }
+    // Tip: een andere volgorde van de adressen is goedkoper (alleen als de server dat meldt).
+    function renderStopTip(leg) {
+      if (leg === "return" && !state.roundTrip) return null;
+      const vehicles = (state.priceResult && state.priceResult.vehicles) || [];
+      let best = null;
+      vehicles.forEach((v) => {
+        const tip = leg === "return" ? v.returnTrip && v.returnTrip.stopoverTip : v.stopoverTip;
+        if (tip && (!best || tip.savingEuro > best.savingEuro)) best = tip;
+      });
+      if (!best) return null;
+      const seq = stopSequence(leg);
+      const now = seq.map(shortAddress).join(" → ");
+      const next = applyStopSwap(seq, best.swapEnd).map(shortAddress).join(" → ");
+      const title = state.roundTrip ? (leg === "return" ? t("Tip voor de terugrit", "Tip for the return trip") : t("Tip voor de heenrit", "Tip for the outbound trip")) : t("Tip", "Tip");
+      return el("div", { class: "wnt-stopover-tip" }, [
+        el("p", {}, [
+          el("strong", { text: title + ": " }),
+          t("een andere volgorde is goedkoper. Bespaart tot ", "a different order is cheaper. Saves up to "),
+          el("strong", { text: euro(best.savingEuro) }),
+          ".",
+        ]),
+        el("p", { class: "wnt-hint" }, [t("Nu: ", "Now: ") + now]),
+        el("p", { class: "wnt-hint" }, [t("Voorstel: ", "Suggestion: ") + next]),
+        el("button", {
+          type: "button",
+          class: "wnt-button wnt-button-secondary wnt-button-small",
+          text: t("Volgorde omdraaien", "Swap the order"),
+          onclick: () => swapStopOrder(leg, best.swapEnd),
+        }),
+      ]);
     }
 
     function getDefaultLeadMinutes() {
@@ -1034,6 +1235,10 @@
     function returnTripBody(withDetails) {
       if (!state.roundTrip || !state.returnDateTime) return undefined;
       const body = { dateTime: state.returnDateTime.toISOString() };
+      if (returnStopActive()) {
+        Object.assign(body, stopBody(state.returnStop));
+        if (state.returnSwapped) body.swapOrder = true;
+      }
       if (withDetails) {
         const flight = isReturnAirportPickup() ? normalizeFlightNumberInput(state.returnFlightNumber) || state.returnFlightNumber.trim() : "";
         if (flight) body.flightNumber = flight;
@@ -1322,6 +1527,7 @@
         destinationZone: resolveZone(state.destination) || undefined,
         originAddress: state.origin.text,
         destinationAddress: state.destination.text,
+        ...(stopActive() ? stopBody(state.stop) : {}),
         discountCode: sentDiscountCode || undefined,
         returnTrip: returnTripBody(false),
         sessionId: state.sessionId,
@@ -1499,6 +1705,7 @@
         destinationZone: resolveZone(state.destination) || undefined,
         originAddress: state.origin.text,
         destinationAddress: state.destination.text,
+        ...(stopActive() ? stopBody(state.stop) : {}),
         passenger: { ...state.passenger, language: detectPageLanguageCode() },
         note: noteParts.join(" ") || undefined,
         // Het vinkje bij "Gegevens"; de server eist dit en legt het tijdstip vast.
@@ -1722,8 +1929,10 @@
       return false;
     }
 
-    function renderAddressField(labelText, fieldKey, onFieldChange) {
+    function renderAddressField(labelText, fieldKey, onFieldChange, opts) {
       const field = state[fieldKey];
+      // Een tussenstop is altijd een gewoon adres: geen snelkeuzelocaties of vast tarief.
+      const noPoi = Boolean(opts && opts.noPoi);
       const wrapper = el("div", { class: "wnt-field wnt-address-field" });
       wrapper.appendChild(el("label", { text: labelText }));
 
@@ -1753,7 +1962,7 @@
       }
 
       function renderSuggestionList(query) {
-        const pois = state.config.pois || [];
+        const pois = noPoi ? [] : state.config.pois || [];
         // Zoeken op naam, categorie en gelijkwaardige woorden (14 oktober 2026,
         // Hans): "ziekenhuis" toont alle locaties met die categorie, en
         // "vliegveld", "luchthaven" en "airport" worden als hetzelfde gezien.
@@ -1850,7 +2059,7 @@
       const poiConfirm = el("div", { class: "wnt-poi-confirm", hidden: true });
 
       function updatePoiConfirm() {
-        const match = field.poiConfirmPending;
+        const match = noPoi ? null : field.poiConfirmPending;
         poiConfirm.innerHTML = "";
         if (!match) {
           poiConfirm.hidden = true;
@@ -1899,7 +2108,7 @@
       const input = el("input", {
         type: "text",
         value: field.text,
-        placeholder: t("Adres, plaatsnaam of bekende bestemming", "Address, town or well-known destination"),
+        placeholder: noPoi ? t("Adres of plaatsnaam", "Address or town") : t("Adres, plaatsnaam of bekende bestemming", "Address, town or well-known destination"),
         autocomplete: "off",
         ...(fieldErrorMessage(fieldKey) ? { "aria-invalid": "true" } : {}),
         class: fieldErrorMessage(fieldKey) ? "wnt-invalid" : undefined,
@@ -1911,7 +2120,7 @@
           // niet meer geldig (zie resolveAddressZoneAndPoiMatch).
           field.zone = null;
           field.poiConfirmPending = null;
-          const poiMatch = matchPoiByText(field.text);
+          const poiMatch = noPoi ? null : matchPoiByText(field.text);
           if (poiMatch) {
             field.poiId = poiMatch.id;
             field.confirmed = true;
@@ -2047,7 +2256,10 @@
         updateReturnBlock();
       };
       container.appendChild(renderAddressField(t("Ophaaladres", "Pickup address"), "origin", onAddressChange));
+      // Tussenstop (5 november 2026): het veld verschijnt pas als de klant kiest voor "Tussenstop toevoegen".
+      if (stopoverEnabled() && state.stopOpen) container.appendChild(renderStopBlock("outbound", onAddressChange));
       container.appendChild(renderAddressField(t("Bestemming", "Destination"), "destination", onAddressChange));
+      if (stopoverEnabled() && !state.stopOpen) container.appendChild(renderStopToggle("outbound"));
       container.appendChild(serviceAreaWarning);
 
       const dateWrapper = el("div", { class: "wnt-field" });
@@ -2180,6 +2392,11 @@
                 state.returnFlightManualLanding = "";
                 state.returnFlightManualOpen = false;
                 state.returnTimeSteps = [];
+                state.returnStopOpen = false;
+                state.returnStop = emptyStopField();
+                state.returnStopDeclined = false;
+                state.returnSwapped = false;
+                delete state.fieldErrors.returnStop;
               }
               render();
             },
@@ -2243,6 +2460,8 @@
         const returnDateErrorNode = fieldErrorNode("returnDateTime");
         if (returnDateErrorNode) returnDateField.appendChild(returnDateErrorNode);
         returnBox.appendChild(returnDateField);
+        const returnStopNode = renderReturnStopBlock(updateReturnBlock);
+        if (returnStopNode) returnBox.appendChild(returnStopNode);
 
         returnFlightBox.appendChild(el("label", { text: t("Vluchtnummer terugvlucht", "Flight number of return flight") }));
         returnFlightBox.appendChild(
@@ -2390,6 +2609,15 @@
             } else if (!isFieldConfirmed(state.destination)) {
               errors.push(["destination", t("Deze bestemming herkennen we niet. Typ hem opnieuw en kies een adres uit de lijst die verschijnt.", "We do not recognise this destination. Type it again and choose an address from the list that appears.")]);
             }
+            // Tussenstop (5 november 2026): een geopende tussenstop moet een herkend adres hebben.
+            [["stop", stopoverEnabled() && state.stopOpen, state.stop], ["returnStop", stopoverEnabled() && state.roundTrip && state.returnStopOpen, state.returnStop]].forEach(([key, open, field]) => {
+              if (!open) return;
+              if (!field.text.trim()) {
+                errors.push([key, t("Vul het adres van de tussenstop in, of verwijder de tussenstop.", "Enter the address of the stopover, or remove the stopover.")]);
+              } else if (!isFieldConfirmed(field)) {
+                errors.push([key, t("Dit adres herkennen we niet. Typ het opnieuw en kies een adres uit de lijst die verschijnt.", "We do not recognise this address. Type it again and choose an address from the list that appears.")]);
+              }
+            });
             // Vluchtnummer verplicht bij een luchthaven-ophaalrit (Hans, 2
             // oktober 2026, expliciete keuze: "Verplicht veld" i.p.v. optioneel).
             if (isAirportPickup() && !state.flightNumber.trim()) {
@@ -2872,10 +3100,12 @@
       const to = state.destination.text.trim();
       const rows = [];
       rows.push([t("Van", "From"), from]);
+      if (stopActive()) rows.push([t("Tussenstop", "Stopover"), state.stop.text.trim()]);
       rows.push([t("Naar", "To"), to]);
       if (state.roundTrip && state.returnDateTime) {
         rows.push([t("Heenrit", "Outbound trip"), formatDateTime(getEffectiveDateTime())]);
         rows.push([t("Terugrit", "Return trip"), formatDateTime(state.returnDateTime)]);
+        if (returnStopActive()) rows.push([t("Tussenstop terugrit", "Return stopover"), state.returnStop.text.trim()]);
       } else {
         rows.push([t("Wanneer", "When"), formatDateTime(getEffectiveDateTime())]);
       }
@@ -3049,6 +3279,17 @@
             ),
           ])
         );
+        if (state.priceResult.route.stopover && stopActive()) {
+          const so = state.priceResult.route.stopover;
+          container.appendChild(
+            el("p", { class: "wnt-hint" }, [
+              t(
+                "Tussenstop bij " + shortAddress(state.stop.text) + ": omweg ca. " + so.extraKm.toFixed(1).replace(".", ",") + " km, " + so.extraMinutes + " min. De omwegtoeslag staat bij de prijs.",
+                "Stopover at " + shortAddress(state.stop.text) + ": detour approx. " + so.extraKm.toFixed(1) + " km, " + so.extraMinutes + " min. The detour surcharge is included in the price."
+              ),
+            ])
+          );
+        }
         const isRound = Boolean(state.roundTrip && state.priceResult.returnRoute);
         const arrivalNode = renderEstimatedArrival(
           state.priceResult.route.estimatedArrival,
@@ -3067,6 +3308,16 @@
               ),
             ])
           );
+          if (back.stopover && returnStopActive()) {
+            container.appendChild(
+              el("p", { class: "wnt-hint" }, [
+                t(
+                  "Tussenstop terugrit bij " + shortAddress(state.returnStop.text) + ": omweg ca. " + back.stopover.extraKm.toFixed(1).replace(".", ",") + " km, " + back.stopover.extraMinutes + " min.",
+                  "Return stopover at " + shortAddress(state.returnStop.text) + ": detour approx. " + back.stopover.extraKm.toFixed(1) + " km, " + back.stopover.extraMinutes + " min."
+                ),
+              ])
+            );
+          }
           const backArrival = renderEstimatedArrival(back.estimatedArrival, state.returnDateTime, t("Verwachte aankomst terugrit: ", "Expected arrival return trip: "));
           if (backArrival) container.appendChild(backArrival);
         }
@@ -3095,6 +3346,11 @@
       }
 
       container.appendChild(renderDiscountBox());
+
+      ["outbound", "return"].forEach((leg) => {
+        const tipNode = renderStopTip(leg);
+        if (tipNode) container.appendChild(tipNode);
+      });
 
       const grid = el("div", { class: "wnt-vehicle-grid" });
       (state.priceResult ? state.priceResult.vehicles : []).forEach((vehicle) => {
@@ -3515,11 +3771,13 @@
       } else if (rideNumber) rows.push([t("Ritnummer", "Trip number"), rideNumber]);
       else if (reference) rows.push([t("Referentie", "Reference"), reference]);
       rows.push([back ? t("Heenrit: ophalen", "Outbound: pickup") : t("Ophalen", "Pickup"), summary.originAddress]);
+      if (summary.stopAddress) rows.push([back ? t("Heenrit: tussenstop", "Outbound: stopover") : t("Tussenstop", "Stopover"), summary.stopAddress]);
       rows.push([back ? t("Heenrit: bestemming", "Outbound: destination") : t("Bestemming", "Destination"), summary.destinationAddress]);
       rows.push([back ? t("Heenrit: datum en tijd", "Outbound: date and time") : t("Datum en tijd", "Date and time"), formatLongDateTime(new Date(summary.dateTime))]);
       if (summary.flightNumber) rows.push([back ? t("Heenrit: vluchtnummer", "Outbound: flight number") : t("Vluchtnummer", "Flight number"), summary.flightNumber]);
       if (back) {
         rows.push([t("Terugrit: ophalen", "Return: pickup"), back.originAddress]);
+        if (back.stopAddress) rows.push([t("Terugrit: tussenstop", "Return: stopover"), back.stopAddress]);
         rows.push([t("Terugrit: bestemming", "Return: destination"), back.destinationAddress]);
         rows.push([t("Terugrit: datum en tijd", "Return: date and time"), formatLongDateTime(new Date(back.dateTime))]);
         if (back.flightNumber) rows.push([t("Terugrit: vluchtnummer", "Return: flight number"), back.flightNumber]);

@@ -1072,3 +1072,34 @@
   background: var(--wnt-accent);
   border-color: var(--wnt-accent);
 }
+
+/* Tussenstop (5 november 2026): het veld verschijnt pas na "Tussenstop toevoegen". */
+.wnt-stopover-toggle {
+  margin: -0.25rem 0 1rem;
+}
+
+.wnt-stopover {
+  margin: 0 0 1rem;
+  padding-left: 0.75rem;
+  border-left: 3px solid var(--wnt-accent);
+}
+
+.wnt-stopover .wnt-field {
+  margin-bottom: 0.25rem;
+}
+
+.wnt-stopover-proposal {
+  margin: 0.25rem 0 1rem;
+}
+
+.wnt-stopover-tip {
+  margin: 0.75rem 0 1rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--wnt-accent);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.wnt-stopover-tip p {
+  margin: 0 0 0.35rem;
+}

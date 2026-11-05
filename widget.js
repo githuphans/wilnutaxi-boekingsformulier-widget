@@ -229,6 +229,7 @@
     // "Zitverhoger" / "Zitverhoger (2x)" (toeslag van de server, 18 oktober 2026)
     const seat = /^Zitverhoger(?: \((\d+)x\))?$/.exec(String(name || ""));
     if (name === "Tussenstop (omweg)") return "Stopover (detour)";
+    if (name === "Tussenstop") return "Stopover";
     if (seat) return seat[1] ? `Child booster seat (${seat[1]}x)` : "Child booster seat";
     return label(name);
   }
@@ -827,9 +828,10 @@
       let best = null;
       vehicles.forEach((v) => {
         const tip = leg === "return" ? v.returnTrip && v.returnTrip.stopoverTip : v.stopoverTip;
-        if (tip && (!best || tip.savingEuro > best.savingEuro)) best = tip;
+        if (tip && (!best || (tip.savingKm || 0) > (best.savingKm || 0))) best = tip;
       });
       if (!best) return null;
+      const tipKm = Number(best.savingKm || 0).toFixed(1).replace(LANG === "nl" ? "." : ",", LANG === "nl" ? "," : ".");
       const seq = stopSequence(leg);
       const now = seq.map(shortAddress).join(" → ");
       const next = applyStopSwap(seq, best.swapEnd).map(shortAddress).join(" → ");
@@ -837,8 +839,12 @@
       return el("div", { class: "wnt-stopover-tip" }, [
         el("p", {}, [
           el("strong", { text: title + ": " }),
-          t("een andere volgorde is goedkoper. Bespaart tot ", "a different order is cheaper. Saves up to "),
-          el("strong", { text: euro(best.savingEuro) }),
+          t("een andere volgorde is korter: ca. ", "a different order is shorter: approx. "),
+          el("strong", { text: tipKm + " km" }),
+          t(" minder rijden", " less driving"),
+          best.savingMinutes >= 2 ? t(" (ca. " + best.savingMinutes + " min)", " (approx. " + best.savingMinutes + " min)") : "",
+          best.savingEuro >= 0.5 ? t(" en ", " and ") : "",
+          best.savingEuro >= 0.5 ? el("strong", { text: euro(best.savingEuro) + t(" goedkoper", " cheaper") }) : "",
           ".",
         ]),
         el("p", { class: "wnt-hint" }, [t("Nu: ", "Now: ") + now]),
@@ -3284,8 +3290,8 @@
           container.appendChild(
             el("p", { class: "wnt-hint" }, [
               t(
-                "Tussenstop bij " + shortAddress(state.stop.text) + ": omweg ca. " + so.extraKm.toFixed(1).replace(".", ",") + " km, " + so.extraMinutes + " min. De omwegtoeslag staat bij de prijs.",
-                "Stopover at " + shortAddress(state.stop.text) + ": detour approx. " + so.extraKm.toFixed(1) + " km, " + so.extraMinutes + " min. The detour surcharge is included in the price."
+                "Tussenstop bij " + shortAddress(state.stop.text) + ": omweg ca. " + so.extraKm.toFixed(1).replace(".", ",") + " km, " + so.extraMinutes + " min. De toeslag voor de tussenstop staat bij de prijs.",
+                "Stopover at " + shortAddress(state.stop.text) + ": detour approx. " + so.extraKm.toFixed(1) + " km, " + so.extraMinutes + " min. The stopover surcharge is included in the price."
               ),
             ])
           );

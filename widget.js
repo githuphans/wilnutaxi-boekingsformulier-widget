@@ -798,7 +798,7 @@
           el("div", { class: "wnt-poi-confirm-buttons" }, [
             el("button", {
               type: "button",
-              class: "wnt-button wnt-button-primary wnt-button-small",
+              class: "wnt-button wnt-button-secondary wnt-button-small",
               text: t("Ja, zelfde tussenstop", "Yes, same stopover"),
               onclick: () => {
                 state.returnStop = Object.assign({}, state.stop);
@@ -813,10 +813,12 @@
               text: t("Nee", "No"),
               onclick: () => {
                 state.returnStopDeclined = true;
+                delete state.fieldErrors.returnStop;
                 render();
               },
             }),
           ]),
+          fieldErrorNode("returnStop"),
         ]);
       }
       return renderStopToggle("return");
@@ -2616,6 +2618,14 @@
               errors.push(["destination", t("Deze bestemming herkennen we niet. Typ hem opnieuw en kies een adres uit de lijst die verschijnt.", "We do not recognise this destination. Type it again and choose an address from the list that appears.")]);
             }
             // Tussenstop (5 november 2026): een geopende tussenstop moet een herkend adres hebben.
+            // De vraag "ook op de terugrit?" moet beantwoord zijn, anders blijft de stop stilzwijgend weg.
+            if (stopoverEnabled() && state.roundTrip && stopActive() && !state.returnStopOpen && !state.returnStopDeclined) {
+              errors.push([
+                "returnStop",
+                t("Kies of de terugrit ook een tussenstop heeft: Ja of Nee.", "Please choose whether the return trip also has a stopover: Yes or No."),
+                () => stopoverEnabled() && state.roundTrip && stopActive() && !state.returnStopOpen && !state.returnStopDeclined,
+              ]);
+            }
             [["stop", stopoverEnabled() && state.stopOpen, state.stop], ["returnStop", stopoverEnabled() && state.roundTrip && state.returnStopOpen, state.returnStop]].forEach(([key, open, field]) => {
               if (!open) return;
               if (!field.text.trim()) {

@@ -2044,7 +2044,13 @@
       function updateRecognized() {
         if (field.poiId) {
           const poi = findPoiById(field.poiId);
-          recognized.textContent = t(`✓ Herkend als ${poi.name}. Waar mogelijk rekenen we een vast tarief.`, `✓ Recognised as ${poi.name}. Where possible we charge a fixed rate.`);
+          // Alleen een vast tarief noemen als deze locatie er echt vaste tarieven voor heeft
+          // (8 november 2026, Hans: bij een ziekenhuis gaf dat verkeerde verwachtingen).
+          // Een oudere backend zonder dit veld: tekst zoals voorheen.
+          recognized.textContent =
+            poi.hasFixedRoutes === false
+              ? t(`✓ Herkend als ${poi.name}.`, `✓ Recognised as ${poi.name}.`)
+              : t(`✓ Herkend als ${poi.name}. Waar mogelijk rekenen we een vast tarief.`, `✓ Recognised as ${poi.name}. Where possible we charge a fixed rate.`);
           recognized.hidden = false;
         } else if (field.confirmed) {
           recognized.textContent = t("✓ Adres bevestigd.", "✓ Address confirmed.");
@@ -2073,13 +2079,22 @@
           poiConfirm.hidden = true;
           return;
         }
+        // Zinnen over een vast tarief alleen bij locaties die er echt vaste tarieven voor hebben.
+        const fixed = (findPoiById(match.id) || match).hasFixedRoutes !== false;
         const question =
           match.category === "Vliegveld"
-            ? t(
-                `Bedoelt u ${match.name}? Dan geldt ons vaste tarief en vragen we straks naar uw vluchtnummer.`,
-                `Do you mean ${match.name}? Then our fixed rate applies and we will ask for your flight number shortly.`
-              )
-            : t(`Bedoelt u ${match.name}? Dan geldt ons vaste tarief.`, `Do you mean ${match.name}? Then our fixed rate applies.`);
+            ? fixed
+              ? t(
+                  `Bedoelt u ${match.name}? Dan geldt ons vaste tarief en vragen we straks naar uw vluchtnummer.`,
+                  `Do you mean ${match.name}? Then our fixed rate applies and we will ask for your flight number shortly.`
+                )
+              : t(
+                  `Bedoelt u ${match.name}? Dan vragen we straks naar uw vluchtnummer.`,
+                  `Do you mean ${match.name}? Then we will ask for your flight number shortly.`
+                )
+            : fixed
+              ? t(`Bedoelt u ${match.name}? Dan geldt ons vaste tarief.`, `Do you mean ${match.name}? Then our fixed rate applies.`)
+              : t(`Bedoelt u ${match.name}?`, `Do you mean ${match.name}?`);
         poiConfirm.appendChild(el("p", { class: "wnt-poi-confirm-question" }, [question]));
         poiConfirm.appendChild(
           el("div", { class: "wnt-poi-confirm-buttons" }, [

@@ -1146,3 +1146,8 @@
 .wnt-widget.wnt-widget .wnt-suggestion:last-child {
   border-bottom: none;
 }
+
+/* 10 november 2026: ontbrekend huisnummer valt op, net als de tip bij te lang typen. */
+.wnt-address-number-note {
+  border-left-color: #b45309;
+}

@@ -930,6 +930,14 @@
       return field.confirmed || state.placesUnavailable;
     }
 
+    // Melding bij "Verder" als bij een gekozen straat of plaats het huisnummer ontbreekt (10 november 2026).
+    function numberErrorFor(field) {
+      if (!field.numberNeeded) return null;
+      return field.numberNeeded === "number"
+        ? t("Vul ook het huisnummer in. Typ straat en huisnummer en kies uw adres in de lijst die verschijnt.", "Please also enter the house number. Type street and house number and choose your address from the list that appears.")
+        : t("Vul een adres in met straat en huisnummer en kies het in de lijst die verschijnt.", "Enter an address with street and house number and choose it from the list that appears.");
+    }
+
     // Haalt live adressuggesties op bij de backend (die op zijn beurt
     // Google Places aanroept, zie placesRoute.js). Puur de aanroep zelf —
     // de debounce (om niet bij elke toetsaanslag een aanvraag te doen) zit
@@ -1954,6 +1962,23 @@
       return v.length > 55;
     }
 
+    // 10 november 2026 (Hans): een gewoon adres moet een huisnummer hebben. Google geeft per
+    // suggestie de soort mee (`types`). Een straat zonder nummer ("route") of een plaats of wijk
+    // is geen volledig adres; een gebouw, bedrijf of bekende plek (establishment, point_of_interest)
+    // en een adres met nummer wel. Bekende locaties (POI's) uit de lijst worden hier nooit
+    // gecontroleerd. Zonder `types` (oudere backend) controleren we niets.
+    // Geeft null (volledig), "number" (straat zonder huisnummer) of "street" (plaats of wijk).
+    function placeIncompleteKind(place) {
+      const types = place && Array.isArray(place.types) ? place.types : null;
+      if (!types || !types.length) return null;
+      const complete = ["street_address", "premise", "subpremise", "establishment", "point_of_interest", "airport", "transit_station", "street_number"];
+      if (types.some((x) => complete.indexOf(x) !== -1)) return null;
+      const firstPart = String((place && place.description) || "").split(",")[0].trim();
+      // Eindigt het eerste deel op een huisnummer (12, 12a, 12-3, 12 A), dan is het volledig.
+      if (/(^|\s)\d{1,4}(\s?[a-z]|[-\/]\d{1,4}[a-z]?)?$/i.test(firstPart)) return null;
+      return types.indexOf("route") !== -1 ? "number" : "street";
+    }
+
     function renderAddressField(labelText, fieldKey, onFieldChange, opts) {
       const field = state[fieldKey];
       // Een tussenstop is altijd een gewoon adres: geen snelkeuzelocaties of vast tarief.
@@ -1983,11 +2008,52 @@
           "Tip: you only need to enter street, house number and town. The more you enter, the harder the address is to find."
         ),
       ]);
+      // Melding dat er een huisnummer (of straat) ontbreekt; blijft staan tot het adres compleet is.
+      const numberNote = el("p", { class: "wnt-address-tip wnt-address-number-note", hidden: true });
       function updateAddressHints() {
         const open = !field.confirmed && !state.placesUnavailable;
-        const tip = open && looksOverlong(field.text);
+        const needNumber = open && !!field.numberNeeded && !/\d/.test(field.text || "");
+        if (needNumber) {
+          const example = String(field.numberExample || "").trim();
+          numberNote.textContent =
+            field.numberNeeded === "number"
+              ? t(
+                  `Vul ook het huisnummer in${example ? `, bijvoorbeeld "${example} 22"` : ""}. Kies daarna uw adres in de lijst.`,
+                  `Please also enter the house number${example ? `, for example "${example} 22"` : ""}. Then choose your address from the list.`
+                )
+              : t(
+                  "Dit is een plaats of wijk. Vul het adres in met straat en huisnummer, bijvoorbeeld \"Molvense Erven 22, Leende\".",
+                  "This is a town or district. Enter the address with street and house number, for example \"Molvense Erven 22, Leende\"."
+                );
+        }
+        numberNote.hidden = !needNumber;
+        const tip = open && !needNumber && looksOverlong(field.text);
         addressTip.hidden = !tip;
-        addressHint.hidden = !open || tip;
+        addressHint.hidden = !open || tip || needNumber;
+      }
+
+      // Een suggestie zonder huisnummer wordt niet bevestigd: de klant vult het nummer aan.
+      function startNumberEntry(place, kind) {
+        delete state.addressOffers[fieldKey];
+        const first = String((place && place.description) || "").split(",")[0].trim();
+        field.confirmed = false;
+        field.poiId = null;
+        field.zone = null;
+        field.poiConfirmPending = null;
+        field.numberNeeded = kind;
+        field.numberExample = kind === "number" ? first : "";
+        field.text = kind === "number" ? first + " " : "";
+        suggestions.hidden = true;
+        input.value = field.text;
+        updateRecognized();
+        if (onFieldChange) onFieldChange();
+        input.focus();
+        try {
+          input.setSelectionRange(field.text.length, field.text.length);
+        } catch (e) {
+          /* geen probleem */
+        }
+        refreshSuggestions(field.text);
       }
 
       // "Bedoelt u ...?": kiest de klant niet zelf een adres uit de lijst, dan stellen we het
@@ -2011,7 +2077,7 @@
               onclick: () => {
                 delete state.addressOffers[fieldKey];
                 if (offer.poi) selectSuggestion(offer.poi.name, offer.poi.id);
-                else selectSuggestion(offer.label, null);
+                else selectSuggestion(offer.label, null, offer.place);
               },
             }),
             el("button", {
@@ -2044,11 +2110,23 @@
             lastPlaceSuggestions = list;
             lastFetchedQuery = query;
           }
-          if (list.length) offer = { label: list[0].description, poi: null };
+          if (list.length) {
+            const kind = placeIncompleteKind(list[0]);
+            if (kind) {
+              // Alleen een straat of plaats gevonden: geen voorstel, maar vragen om het huisnummer.
+              if (!field.confirmed && String(field.text || "").trim() === query) {
+                field.numberNeeded = kind;
+                field.numberExample = kind === "number" ? String(list[0].description || "").split(",")[0].trim() : "";
+                updateAddressHints();
+              }
+              return;
+            }
+            offer = { label: list[0].description, poi: null, place: list[0] };
+          }
         }
         // De klant kan intussen verder getypt of gekozen hebben.
         if (!offer || field.confirmed || String(field.text || "").trim() !== query) return;
-        state.addressOffers[fieldKey] = { forText: query, label: offer.label, poiId: offer.poi ? offer.poi.id : null };
+        state.addressOffers[fieldKey] = { forText: query, label: offer.label, poiId: offer.poi ? offer.poi.id : null, place: offer.place || null };
         if (didYouMean.isConnected) {
           showDidYouMean(offer);
         } else if (!(document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName))) {
@@ -2059,8 +2137,15 @@
         }
       }
 
-      function selectSuggestion(text, poiId) {
+      function selectSuggestion(text, poiId, place) {
+        const incompleteKind = poiId ? null : placeIncompleteKind(place);
+        if (incompleteKind) {
+          clearFieldError(fieldKey, input);
+          startNumberEntry(place, incompleteKind);
+          return;
+        }
         delete state.addressOffers[fieldKey];
+        field.numberNeeded = null;
         clearFieldError(fieldKey, input);
         field.text = text;
         field.poiId = poiId || null;
@@ -2110,7 +2195,7 @@
           suggestions.appendChild(
             el(
               "button",
-              { type: "button", class: "wnt-suggestion", onclick: () => selectSuggestion(place.description, null) },
+              { type: "button", class: "wnt-suggestion", onclick: () => selectSuggestion(place.description, null, place) },
               [el("span", { class: "wnt-suggestion-badge wnt-suggestion-badge-address", text: t("Adres", "Address") }), " " + place.description]
             )
           );
@@ -2273,7 +2358,13 @@
             const exactPlaceMatch = lastPlaceSuggestions.find(
               (s) => s.description.trim().toLowerCase() === field.text.trim().toLowerCase()
             );
-            field.confirmed = !!exactPlaceMatch;
+            const exactKind = exactPlaceMatch ? placeIncompleteKind(exactPlaceMatch) : null;
+            field.confirmed = !!exactPlaceMatch && !exactKind;
+            if (exactKind) {
+              field.numberNeeded = exactKind;
+              field.numberExample = exactKind === "number" ? String(exactPlaceMatch.description || "").split(",")[0].trim() : "";
+            }
+            if (!field.text.trim()) field.numberNeeded = null;
             if (field.confirmed) resolveAddressZoneAndPoiMatch(field);
           }
           refreshSuggestions(field.text);
@@ -2304,6 +2395,7 @@
       wrapper.appendChild(input);
       wrapper.appendChild(addressHint);
       wrapper.appendChild(addressTip);
+      wrapper.appendChild(numberNote);
       wrapper.appendChild(suggestions);
       wrapper.appendChild(recognized);
       wrapper.appendChild(poiConfirm);
@@ -2312,7 +2404,7 @@
       // voorstel opnieuw tonen, zolang de tekst nog dezelfde is.
       const earlierOffer = state.addressOffers[fieldKey];
       if (earlierOffer && !field.confirmed && String(field.text || "").trim() === earlierOffer.forText) {
-        showDidYouMean({ label: earlierOffer.label, poi: earlierOffer.poiId ? findPoiById(earlierOffer.poiId) : null });
+        showDidYouMean({ label: earlierOffer.label, poi: earlierOffer.poiId ? findPoiById(earlierOffer.poiId) : null, place: earlierOffer.place || null });
       }
       const addressErrorNode = fieldErrorNode(fieldKey);
       if (addressErrorNode) wrapper.appendChild(addressErrorNode);
@@ -2759,12 +2851,12 @@
               // Zie isFieldConfirmed hierboven: een adres moet uit de
               // voorgestelde lijst gekozen zijn (of exact overeenkomen), zodat
               // we zeker weten dat het een geldig, door Google herkend adres is.
-              errors.push(["origin", t("Dit adres herkennen we niet. Typ het opnieuw en kies een adres uit de lijst die verschijnt.", "We do not recognise this address. Type it again and choose an address from the list that appears.")]);
+              errors.push(["origin", numberErrorFor(state.origin) || t("Dit adres herkennen we niet. Typ het opnieuw en kies een adres uit de lijst die verschijnt.", "We do not recognise this address. Type it again and choose an address from the list that appears.")]);
             }
             if (!state.destination.text.trim()) {
               errors.push(["destination", t("Vul de bestemming in.", "Please enter the destination.")]);
             } else if (!isFieldConfirmed(state.destination)) {
-              errors.push(["destination", t("Deze bestemming herkennen we niet. Typ hem opnieuw en kies een adres uit de lijst die verschijnt.", "We do not recognise this destination. Type it again and choose an address from the list that appears.")]);
+              errors.push(["destination", numberErrorFor(state.destination) || t("Deze bestemming herkennen we niet. Typ hem opnieuw en kies een adres uit de lijst die verschijnt.", "We do not recognise this destination. Type it again and choose an address from the list that appears.")]);
             }
             // Tussenstop (5 november 2026): een geopende tussenstop moet een herkend adres hebben.
             // De vraag "ook op de terugrit?" moet beantwoord zijn, anders blijft de stop stilzwijgend weg.
@@ -2780,7 +2872,7 @@
               if (!field.text.trim()) {
                 errors.push([key, t("Vul het adres van de tussenstop in, of verwijder de tussenstop.", "Enter the address of the stopover, or remove the stopover.")]);
               } else if (!isFieldConfirmed(field)) {
-                errors.push([key, t("Dit adres herkennen we niet. Typ het opnieuw en kies een adres uit de lijst die verschijnt.", "We do not recognise this address. Type it again and choose an address from the list that appears.")]);
+                errors.push([key, numberErrorFor(field) || t("Dit adres herkennen we niet. Typ het opnieuw en kies een adres uit de lijst die verschijnt.", "We do not recognise this address. Type it again and choose an address from the list that appears.")]);
               }
             });
             // Vluchtnummer verplicht bij een luchthaven-ophaalrit (Hans, 2

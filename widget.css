@@ -270,6 +270,40 @@
   border-top: 1px solid var(--wnt-border);
 }
 
+/* 9 november 2026: de lijst met adressen moet opvallen als iets waar je op tikt. */
+.wnt-suggestions:not([hidden]) {
+  border-color: var(--wnt-accent);
+  border-width: 2px;
+}
+
+.wnt-suggestions-title {
+  margin: 0;
+  padding: 0.45em 0.7em;
+  font-size: 0.8em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--wnt-accent);
+  background: var(--wnt-bg-subtle);
+  border-bottom: 1px solid var(--wnt-border);
+}
+
+.wnt-address-hint {
+  margin: 0.3rem 0 0;
+}
+
+.wnt-address-tip {
+  margin: 0.3rem 0 0;
+  padding: 0.5em 0.7em;
+  font-size: 0.88em;
+  border-left: 3px solid var(--wnt-accent);
+  background: var(--wnt-bg-subtle);
+  border-radius: 0 var(--wnt-radius) var(--wnt-radius) 0;
+}
+
+.wnt-address-didyoumean {
+  margin-top: 0.4rem;
+}
+
 .wnt-button {
   padding: 0.7em 1.4em;
   border-radius: var(--wnt-radius);
@@ -1102,4 +1136,13 @@
 
 .wnt-stopover-tip p {
   margin: 0 0 0.35rem;
+}
+
+/* 9 november 2026: een lijn tussen de adressen in de lijst (specifieker dan de themaregels hierboven). */
+.wnt-widget.wnt-widget .wnt-suggestion {
+  border-bottom: 1px solid var(--wnt-border);
+}
+
+.wnt-widget.wnt-widget .wnt-suggestion:last-child {
+  border-bottom: none;
 }

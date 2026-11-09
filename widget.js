@@ -366,6 +366,7 @@
     [/^Deze kortingscode geldt voor ritten tot en met (.+)\.$/, (m) => `This discount code is valid for trips up to and including ${m[1]}.`],
     [/^Deze kortingscode is pas geldig vanaf (.+)\.$/, (m) => `This discount code is only valid from ${m[1]}.`],
     [/^Deze kortingscode is verlopen \(geldig tot en met (.+)\)\.$/, (m) => `This discount code has expired (valid until and including ${m[1]}).`],
+    [/^Geen van de ritten valt binnen de periode van deze kortingscode \(ritten van (.+) tot en met (.+)\)\.$/, (m) => `None of the trips fall within the validity period of this discount code (trips from ${m[1]} up to and including ${m[2]}).`],
   ];
 
   function tm(message) {
@@ -533,6 +534,8 @@
       // laten we vrije tekst wél toe, met een zichtbare melding, in plaats
       // van de klant vast te zetten op een kapotte functie.
       placesUnavailable: false,
+      // 9 november 2026: per adresveld het voorstel "Bedoelt u ...?" (zie renderAddressField).
+      addressOffers: {},
       // dateTime/dateTimeTouched: zolang de klant het veld niet zelf heeft
       // aangepast, wordt het moment ELKE keer opnieuw berekend als "nu +
       // voorsprongstijd" (zie getEffectiveDateTime hieronder), in plaats
@@ -1937,6 +1940,20 @@
       return false;
     }
 
+    // 9 november 2026 (feedback van passagiers): veel klanten typen het hele adres met postcode,
+    // provincie en land. Google vindt het adres dan juist slechter. Herkent zo'n lange invoer,
+    // zodat we een tip kunnen tonen.
+    function looksOverlong(text) {
+      const v = String(text || "").trim();
+      if (v.length < 12) return false;
+      const parts = v.split(",").filter((p) => p.trim()).length;
+      if (parts >= 4) return true;
+      if (/\b(nederland|netherlands|holland)\b/i.test(v)) return true;
+      if (/\b(noord[\s-]?brabant|zuid[\s-]?holland|noord[\s-]?holland|gelderland|overijssel|drenthe|flevoland|friesland|fryslân)\b/i.test(v)) return true;
+      if (/\b[1-9]\d{3}\s?[a-z]{2}\b/i.test(v) && parts >= 3) return true;
+      return v.length > 55;
+    }
+
     function renderAddressField(labelText, fieldKey, onFieldChange, opts) {
       const field = state[fieldKey];
       // Een tussenstop is altijd een gewoon adres: geen snelkeuzelocaties of vast tarief.
@@ -1950,8 +1967,100 @@
       // het ophaaladres- en bestemmingsveld elkaars timer niet verstoren.
       let debounceTimer = null;
       let lastPlaceSuggestions = [];
+      let lastFetchedQuery = null;
+
+      // Uitleg onder het veld (9 november 2026): alleen straat, huisnummer en plaats typen
+      // en daarna op het adres in de lijst tikken. Verdwijnt zodra het adres bevestigd is.
+      const addressHint = el("p", { class: "wnt-hint wnt-address-hint" }, [
+        t(
+          "Typ alleen straat, huisnummer en plaats. Tik daarna op uw adres in de lijst die verschijnt.",
+          "Type only street, house number and town. Then tap your address in the list that appears."
+        ),
+      ]);
+      const addressTip = el("p", { class: "wnt-address-tip", hidden: true }, [
+        t(
+          "Tip: u hoeft alleen straat, huisnummer en plaats in te vullen. Hoe meer u invult, hoe moeilijker het adres te vinden is.",
+          "Tip: you only need to enter street, house number and town. The more you enter, the harder the address is to find."
+        ),
+      ]);
+      function updateAddressHints() {
+        const open = !field.confirmed && !state.placesUnavailable;
+        const tip = open && looksOverlong(field.text);
+        addressTip.hidden = !tip;
+        addressHint.hidden = !open || tip;
+      }
+
+      // "Bedoelt u ...?": kiest de klant niet zelf een adres uit de lijst, dan stellen we het
+      // beste voorstel voor met één knop om het te bevestigen.
+      const didYouMean = el("div", { class: "wnt-poi-confirm wnt-address-didyoumean", hidden: true });
+      function hideDidYouMean() {
+        didYouMean.hidden = true;
+        didYouMean.innerHTML = "";
+      }
+      function showDidYouMean(offer) {
+        didYouMean.innerHTML = "";
+        didYouMean.appendChild(
+          el("p", { class: "wnt-poi-confirm-question" }, [t(`Bedoelt u: ${offer.label}?`, `Do you mean: ${offer.label}?`)])
+        );
+        didYouMean.appendChild(
+          el("div", { class: "wnt-poi-confirm-buttons" }, [
+            el("button", {
+              type: "button",
+              class: "wnt-button wnt-button-primary wnt-button-small",
+              text: t("Ja, dat klopt", "Yes, that is correct"),
+              onclick: () => {
+                delete state.addressOffers[fieldKey];
+                if (offer.poi) selectSuggestion(offer.poi.name, offer.poi.id);
+                else selectSuggestion(offer.label, null);
+              },
+            }),
+            el("button", {
+              type: "button",
+              class: "wnt-button wnt-button-secondary wnt-button-small",
+              text: t("Nee, ik kies zelf", "No, I will choose myself"),
+              onclick: () => {
+                delete state.addressOffers[fieldKey];
+                hideDidYouMean();
+                input.focus();
+                refreshSuggestions(field.text);
+              },
+            }),
+          ])
+        );
+        didYouMean.hidden = false;
+      }
+      async function offerBestSuggestion() {
+        if (field.confirmed || state.placesUnavailable) return;
+        const query = String(field.text || "").trim();
+        if (query.length < 3) return;
+        let offer = null;
+        const pois = noPoi ? [] : (state.config.pois || []).filter((p) => poiMatchesQuery(p, query));
+        if (pois.length === 1) {
+          offer = { label: pois[0].name, poi: pois[0] };
+        } else if (pois.length === 0) {
+          let list = lastPlaceSuggestions;
+          if (!list.length || lastFetchedQuery !== query) {
+            list = await fetchAddressSuggestionsNow(query);
+            lastPlaceSuggestions = list;
+            lastFetchedQuery = query;
+          }
+          if (list.length) offer = { label: list[0].description, poi: null };
+        }
+        // De klant kan intussen verder getypt of gekozen hebben.
+        if (!offer || field.confirmed || String(field.text || "").trim() !== query) return;
+        state.addressOffers[fieldKey] = { forText: query, label: offer.label, poiId: offer.poi ? offer.poi.id : null };
+        if (didYouMean.isConnected) {
+          showDidYouMean(offer);
+        } else if (!(document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName))) {
+          // Het veld is intussen opnieuw opgebouwd (bijvoorbeeld door de foutmelding bij "Verder"):
+          // bouw het nog eens op, zodat het voorstel zichtbaar wordt. Niet als de klant al in een
+          // ander veld typt, om de cursor niet te laten springen.
+          render();
+        }
+      }
 
       function selectSuggestion(text, poiId) {
+        delete state.addressOffers[fieldKey];
         clearFieldError(fieldKey, input);
         field.text = text;
         field.poiId = poiId || null;
@@ -1978,6 +2087,12 @@
 
         suggestions.innerHTML = "";
         let hasContent = false;
+
+        // Kopje boven de lijst (9 november 2026): veel klanten snapten niet dat je op een
+        // regel uit de lijst moet tikken.
+        if (poiMatches.length || lastPlaceSuggestions.length) {
+          suggestions.appendChild(el("p", { class: "wnt-suggestions-title" }, [t("Kies uw adres in de lijst:", "Choose your address from the list:")]));
+        }
 
         poiMatches.forEach((poi) => {
           hasContent = true;
@@ -2028,6 +2143,7 @@
         debounceTimer = setTimeout(async () => {
           const wasUnavailable = state.placesUnavailable;
           lastPlaceSuggestions = await fetchAddressSuggestionsNow(query);
+          lastFetchedQuery = query.trim();
           renderSuggestionList(query);
           // state.placesUnavailable kan hier pas ná de aanroep echt vastgesteld
           // worden (zie fetchAddressSuggestionsNow) -- ligt dat anders dan
@@ -2058,6 +2174,7 @@
         } else {
           recognized.hidden = true;
         }
+        updateAddressHints();
       }
       updateRecognized();
 
@@ -2131,13 +2248,17 @@
       const input = el("input", {
         type: "text",
         value: field.text,
-        placeholder: noPoi ? t("Adres of plaatsnaam", "Address or town") : t("Adres, plaatsnaam of bekende bestemming", "Address, town or well-known destination"),
+        placeholder: noPoi
+          ? t("bijv. Molvense Erven 22, Nuenen", "e.g. Molvense Erven 22, Nuenen")
+          : t("bijv. Molvense Erven 22, Nuenen, of Schiphol", "e.g. Molvense Erven 22, Nuenen, or Schiphol"),
         autocomplete: "off",
         ...(fieldErrorMessage(fieldKey) ? { "aria-invalid": "true" } : {}),
         class: fieldErrorMessage(fieldKey) ? "wnt-invalid" : undefined,
         oninput: (e) => {
           const hadPoiId = field.poiId;
           clearFieldError(fieldKey, e.target);
+          delete state.addressOffers[fieldKey];
+          hideDidYouMean();
           field.text = e.target.value;
           // Nieuwe tekst -> een eventuele oudere zone/bevestigingsvraag is
           // niet meer geldig (zie resolveAddressZoneAndPoiMatch).
@@ -2173,13 +2294,26 @@
           }
         },
         onfocus: () => refreshSuggestions(field.text),
-        onblur: () => setTimeout(() => (suggestions.hidden = true), 150),
+        onblur: () =>
+          setTimeout(() => {
+            suggestions.hidden = true;
+            offerBestSuggestion();
+          }, 150),
       });
 
       wrapper.appendChild(input);
+      wrapper.appendChild(addressHint);
+      wrapper.appendChild(addressTip);
       wrapper.appendChild(suggestions);
       wrapper.appendChild(recognized);
       wrapper.appendChild(poiConfirm);
+      wrapper.appendChild(didYouMean);
+      // Na een volledige render (bijvoorbeeld door een foutmelding bij "Volgende") het eerdere
+      // voorstel opnieuw tonen, zolang de tekst nog dezelfde is.
+      const earlierOffer = state.addressOffers[fieldKey];
+      if (earlierOffer && !field.confirmed && String(field.text || "").trim() === earlierOffer.forText) {
+        showDidYouMean({ label: earlierOffer.label, poi: earlierOffer.poiId ? findPoiById(earlierOffer.poiId) : null });
+      }
       const addressErrorNode = fieldErrorNode(fieldKey);
       if (addressErrorNode) wrapper.appendChild(addressErrorNode);
 
@@ -3025,6 +3159,25 @@
             }),
           ])
         );
+        // 9 november 2026: bij een retour waarvan één rit buiten de periode van de code valt, krijgt
+        // alleen de andere rit korting. Dat zeggen we er duidelijk bij.
+        if (state.discountApplied.appliesTo === "outbound" || state.discountApplied.appliesTo === "return") {
+          const outboundOnly = state.discountApplied.appliesTo === "outbound";
+          box.appendChild(
+            el("p", {
+              class: "wnt-hint wnt-discount-partial",
+              text: outboundOnly
+                ? t(
+                    "De korting geldt alleen voor de heenrit: de terugrit valt buiten de periode van de code en kost het normale tarief.",
+                    "The discount only applies to the outbound trip: the return trip falls outside the validity period of the code and costs the regular fare."
+                  )
+                : t(
+                    "De korting geldt alleen voor de terugrit: de heenrit valt buiten de periode van de code en kost het normale tarief.",
+                    "The discount only applies to the return trip: the outbound trip falls outside the validity period of the code and costs the regular fare."
+                  ),
+            })
+          );
+        }
         return box;
       }
 

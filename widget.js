@@ -192,7 +192,7 @@
     rollator: "Rollator (walking frame)",
     "opvouwbare rolstoel": "Folding wheelchair",
     "inklapbare scootmobiel": "Foldable mobility scooter",
-    "opvouwbare kinderwagen": "Folding pushchair",
+    "opvouwbare kinderwagen": "Folding pushchair / stroller",
     zitverhoger: "Child booster seat",
     "1x skiset": "1x Ski set",
     "2x skisets": "2x Ski sets",

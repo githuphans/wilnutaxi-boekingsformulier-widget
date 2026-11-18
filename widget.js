@@ -1550,6 +1550,8 @@
         discountCode: sentDiscountCode || undefined,
         returnTrip: returnTripBody(false),
         sessionId: state.sessionId,
+        // 18 november 2026: de bron (data-origin) ook bij prijsaanvragen, voor de statistieken in /admin.
+        origin: bookingOrigin || undefined,
       };
 
       try {

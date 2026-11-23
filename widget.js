@@ -399,28 +399,87 @@
       month: "long",
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: NL_TIME_ZONE,
     }).format(date);
+  }
+
+  // 23 november 2026 (ritten WNT26112167 en WNT26112139): alle tijden in het
+  // formulier zijn NEDERLANDSE tijd, ongeacht de tijdzone van de browser. Eerder
+  // werd een ingevulde tijd in de tijdzone van de browser gelezen: wie vanuit het
+  // buitenland boekte (Londen +1 uur, New York +6 uur) kreeg een verschoven rit.
+  const NL_TIME_ZONE = "Europe/Amsterdam";
+
+  // Klokdelen van een moment in Nederlandse tijd.
+  function nlClockParts(date) {
+    const parts = {};
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: NL_TIME_ZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(date)
+      .forEach((p) => {
+        if (p.type !== "literal") parts[p.type] = Number(p.value);
+      });
+    return parts;
+  }
+
+  // Verschil (ms) tussen Nederlandse klok en UTC op dit moment (zomer +2 uur, winter +1 uur).
+  function nlOffsetMs(ms) {
+    const p = nlClockParts(new Date(ms));
+    return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Math.floor(ms / 1000) * 1000;
+  }
+
+  // "YYYY-MM-DD" + "HH:mm" (Nederlandse klok) -> het echte moment.
+  function nlWallClockToDate(ymd, hhmm) {
+    const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+    const h = /^(\d{1,2}):(\d{2})/.exec(hhmm);
+    if (!d || !h) return new Date(NaN);
+    const asUtc = Date.UTC(Number(d[1]), Number(d[2]) - 1, Number(d[3]), Number(h[1]), Number(h[2]));
+    // Twee rondes, zodat ook de uren rond de zomer-/wintertijdovergang goed uitkomen.
+    let guess = asUtc - nlOffsetMs(asUtc);
+    guess = asUtc - nlOffsetMs(guess);
+    return new Date(guess);
+  }
+
+  // Een korte melding als de browser in een andere tijdzone staat dan Nederland.
+  function timezoneNote(date) {
+    try {
+      const at = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
+      if (-at.getTimezoneOffset() * 60000 === nlOffsetMs(at.getTime())) return null;
+      return el("p", {
+        class: "wnt-hint wnt-timezone-note",
+        text: t(
+          "Let op: uw apparaat staat op een andere tijdzone. Vul de ophaaltijd in als Nederlandse tijd (de tijd op de plaats van ophalen).",
+          "Please note: your device is set to a different time zone. Enter the pickup time as Dutch time (the local time at the pickup place)."
+        ),
+      });
+    } catch {
+      return null;
+    }
   }
 
   // Voor <input type="datetime-local">, dat een lokale tijd zonder
   // tijdzone-aanduiding verwacht (YYYY-MM-DDTHH:mm).
   function toDateTimeLocalValue(date) {
     const pad = (n) => String(n).padStart(2, "0");
-    return (
-      `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-      `T${pad(date.getHours())}:${pad(date.getMinutes())}`
-    );
+    const p = nlClockParts(date);
+    return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`;
   }
 
-  // datetime-local geeft een string zonder tijdzone terug; we interpreteren
-  // die als lokale tijd van de browser (voor Wilnu Taxi's klanten vrijwel
-  // altijd Europe/Amsterdam) en zetten er zelf een offset bij, zodat het
-  // een geldige ISO-string-met-offset wordt zoals de backend verwacht
-  // (zie priceRequestSchema/bookRequestSchema: z.string().datetime({offset:true})).
+  // datetime-local geeft een string zonder tijdzone terug. Die lezen we sinds
+  // 23 november 2026 ALTIJD als Nederlandse tijd (niet als tijd van de browser),
+  // zodat een klant in het buitenland dezelfde rit boekt als een klant thuis.
+  // Het resultaat is een echt moment (Date); toISOString() geeft de ISO-string
+  // met tijdzone die de backend verwacht.
   function localInputValueToDate(value) {
-    // new Date("YYYY-MM-DDTHH:mm") interpreteert dit al als lokale tijd in
-    // de browser — dat is precies wat we willen.
-    return new Date(value);
+    const m = /^(\d{4}-\d{2}-\d{2})T(\d{1,2}:\d{2})/.exec(String(value || ""));
+    return m ? nlWallClockToDate(m[1], m[2]) : new Date(NaN);
   }
 
   // 15 oktober 2026: willekeurige code per paginabezoek, alleen om bij de
@@ -1112,7 +1171,8 @@
 
     function localDateString(date) {
       const pad = (n) => String(n).padStart(2, "0");
-      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+      const p = nlClockParts(date);
+      return `${p.year}-${pad(p.month)}-${pad(p.day)}`;
     }
 
     // Vluchtgegevens per rit (13 oktober 2026): de heenrit (ophaalrit vanaf een
@@ -1343,9 +1403,14 @@
       const match = /^(\d{1,2}):(\d{2})$/.exec(f.manualLanding || "");
       const pickup = f.pickup();
       if (!match || !pickup || lookedUpLandingIso(kind)) return null;
-      const landing = new Date(pickup);
-      landing.setHours(Number(match[1]), Number(match[2]), 0, 0);
-      if (landing.getTime() - pickup.getTime() > 12 * 3600 * 1000) landing.setDate(landing.getDate() - 1);
+      // Op de ophaaldag volgens de Nederlandse klok (niet die van de browser).
+      const day = localDateString(pickup);
+      const clock = `${match[1]}:${match[2]}`;
+      let landing = nlWallClockToDate(day, clock);
+      if (landing.getTime() - pickup.getTime() > 12 * 3600 * 1000) {
+        const [y, mo, d] = day.split("-").map(Number);
+        landing = nlWallClockToDate(new Date(Date.UTC(y, mo - 1, d - 1)).toISOString().slice(0, 10), clock);
+      }
       return landing;
     }
 
@@ -2558,6 +2623,8 @@
       );
       const dateErrorNode = fieldErrorNode("dateTime");
       if (dateErrorNode) dateWrapper.appendChild(dateErrorNode);
+      const dateZoneNote = timezoneNote(getEffectiveDateTime());
+      if (dateZoneNote) dateWrapper.appendChild(dateZoneNote);
       // 10 oktober 2026 (Hans, om ruimte te besparen): compacte regel met een
       // ⓘ-knop die de uitleg over de 24 uur inline openklapt (geen pop-up:
       // werkt ook in een iframe/mobiel zonder extra "ok"-knop).
@@ -2726,6 +2793,8 @@
               ),
         });
         returnDateField.appendChild(returnDateHint);
+        const returnZoneNote = timezoneNote(state.returnDateTime || getEffectiveDateTime());
+        if (returnZoneNote) returnDateField.appendChild(returnZoneNote);
         const returnDateErrorNode = fieldErrorNode("returnDateTime");
         if (returnDateErrorNode) returnDateField.appendChild(returnDateErrorNode);
         returnBox.appendChild(returnDateField);

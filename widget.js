@@ -496,6 +496,22 @@
     // widget-element. De waarde gaat bij het boeken mee en komt in taxiID in
     // het veld "Oorsprong". Zonder data-origin verandert er niets.
     const bookingOrigin = (root.dataset.origin || "").replace(/\s+/g, " ").trim().slice(0, 60);
+    // 23 november 2026: eigen apparaat uitsluiten van dagrapport en Inzichten. Open de
+    // pagina één keer met ?intern=<sleutel uit /admin> (of ?intern=uit om te wissen);
+    // het apparaat onthoudt de sleutel en stuurt hem mee. Zonder sleutel verandert er niets.
+    const internalKey = (() => {
+      try {
+        const m = /[?&]intern=([^&#]*)/.exec(window.location.search);
+        if (m) {
+          const v = decodeURIComponent(m[1]).trim().slice(0, 64);
+          if (v && v !== "uit") localStorage.setItem("wntIntern", v);
+          else localStorage.removeItem("wntIntern");
+        }
+        return localStorage.getItem("wntIntern") || "";
+      } catch {
+        return "";
+      }
+    })();
     const termsUrlEn = root.dataset.termsUrlEn || termsUrlNl;
     const privacyUrlEn = root.dataset.privacyUrlEn || privacyUrlNl;
     const termsUrl = () => (LANG === "nl" ? termsUrlNl : termsUrlEn);
@@ -1552,6 +1568,7 @@
         sessionId: state.sessionId,
         // 18 november 2026: de bron (data-origin) ook bij prijsaanvragen, voor de statistieken in /admin.
         origin: bookingOrigin || undefined,
+        internalKey: internalKey || undefined,
       };
 
       try {
@@ -1753,6 +1770,7 @@
         returnTrip: returnTripBody(true),
         sessionId: state.sessionId,
         bookingOrigin: bookingOrigin || undefined,
+        internalKey: internalKey || undefined,
       };
 
       try {

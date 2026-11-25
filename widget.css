@@ -1151,3 +1151,202 @@
 .wnt-address-number-note {
   border-left-color: #b45309;
 }
+
+/* ---- Datum- en tijdkiezer in drie stappen: dag, uur, minuten (24 november 2026) ---- */
+
+.wnt-dtp {
+  position: relative;
+}
+
+/* Het veld lijkt op de andere invoervelden en toont het gekozen moment */
+.wnt-widget .wnt-dtp-field {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  width: 100%;
+  min-height: 2.8em;
+  padding: 0.6em 0.7em;
+  border: 1px solid var(--wnt-border);
+  border-radius: var(--wnt-radius);
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wnt-widget .wnt-dtp-field:hover,
+.wnt-widget .wnt-dtp-field:focus-visible,
+.wnt-widget .wnt-dtp-field[aria-expanded="true"] {
+  border-color: var(--wnt-accent);
+  outline: none;
+  box-shadow: 0 0 0 1px var(--wnt-accent);
+}
+
+.wnt-widget .wnt-dtp-field.wnt-invalid {
+  border-color: var(--wnt-error, #b3261e);
+  box-shadow: 0 0 0 1px var(--wnt-error, #b3261e);
+}
+
+.wnt-dtp-icon {
+  display: inline-flex;
+  color: var(--wnt-accent);
+}
+
+.wnt-dtp-text {
+  min-width: 0;
+}
+
+.wnt-dtp-placeholder {
+  color: var(--wnt-text-muted);
+}
+
+/* Het paneel klapt open onder het veld (geen pop-up: werkt ook in een iframe en op mobiel) */
+.wnt-dtp-panel {
+  margin-top: 0.4rem;
+  padding: 0.6rem;
+  border: 1px solid var(--wnt-border);
+  border-radius: var(--wnt-radius);
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+}
+
+.wnt-dtp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.wnt-widget .wnt-dtp-title {
+  flex: 1;
+  text-align: center;
+  font-weight: 700;
+  color: var(--wnt-accent);
+  text-transform: capitalize;
+}
+
+.wnt-widget button.wnt-dtp-title-button {
+  padding: 0.4em 0.5em;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wnt-widget button.wnt-dtp-title-button:hover,
+.wnt-widget button.wnt-dtp-title-button:focus-visible {
+  text-decoration: underline;
+}
+
+.wnt-widget .wnt-dtp-nav {
+  width: 2.4em;
+  height: 2.4em;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--wnt-accent);
+  font-size: 1.5em;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wnt-widget button.wnt-dtp-nav:hover:not([disabled]),
+.wnt-widget button.wnt-dtp-nav:focus-visible {
+  background: var(--wnt-bg-subtle);
+}
+
+.wnt-widget .wnt-dtp-nav[disabled] {
+  color: #c4c4c4;
+  cursor: default;
+}
+
+.wnt-dtp-hint {
+  margin: 0.3rem 0 0.5rem;
+  text-align: center;
+  font-size: 0.85em;
+  color: var(--wnt-text-muted);
+}
+
+.wnt-dtp-grid {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.wnt-dtp-grid-date {
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.wnt-dtp-grid-hour,
+.wnt-dtp-grid-minute {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.wnt-dtp-weekday {
+  text-align: center;
+  font-size: 0.8em;
+  color: var(--wnt-text-muted);
+  text-transform: capitalize;
+}
+
+.wnt-widget .wnt-dtp-cell {
+  min-height: 2.6em;
+  padding: 0.2em;
+  border: 1px solid transparent;
+  border-radius: var(--wnt-radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.wnt-widget .wnt-dtp-grid-hour .wnt-dtp-cell,
+.wnt-widget .wnt-dtp-grid-minute .wnt-dtp-cell {
+  min-height: 3em;
+  font-size: 1.05em;
+}
+
+.wnt-widget .wnt-dtp-cell:hover:not([disabled]),
+.wnt-widget .wnt-dtp-cell:focus-visible {
+  background: var(--wnt-bg-subtle);
+  border-color: var(--wnt-accent);
+  outline: none;
+}
+
+.wnt-widget .wnt-dtp-today {
+  border-color: var(--wnt-border);
+  font-weight: 700;
+}
+
+.wnt-widget .wnt-dtp-selected,
+.wnt-widget .wnt-dtp-selected:hover:not([disabled]) {
+  background: var(--wnt-accent);
+  border-color: var(--wnt-accent);
+  color: var(--wnt-accent-contrast);
+}
+
+.wnt-widget .wnt-dtp-cell[disabled] {
+  color: #b8b8b8;
+  text-decoration: line-through;
+  cursor: not-allowed;
+}
+
+.wnt-dtp-legend {
+  margin-top: 0.6rem;
+}
+
+.wnt-widget .wnt-dtp-close {
+  display: block;
+  margin: 0.6rem auto 0;
+  padding: 0.3em 0.8em;
+  border: 0;
+  background: none;
+  color: var(--wnt-text-muted);
+  font: inherit;
+  font-size: 0.9em;
+  text-decoration: underline;
+  cursor: pointer;
+}

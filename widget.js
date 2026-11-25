@@ -447,6 +447,8 @@
     return new Date(guess);
   }
 
+  const NIGHT_CLOCK_FORMAT = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Amsterdam", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+
   // Een korte melding als de browser in een andere tijdzone staat dan Nederland.
   function timezoneNote(date) {
     try {
@@ -464,22 +466,32 @@
     }
   }
 
-  // Voor <input type="datetime-local">, dat een lokale tijd zonder
-  // tijdzone-aanduiding verwacht (YYYY-MM-DDTHH:mm).
-  function toDateTimeLocalValue(date) {
-    const pad = (n) => String(n).padStart(2, "0");
-    const p = nlClockParts(date);
-    return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`;
+  // ---- Hulpfuncties voor de datum- en tijdkiezer (24 november 2026) ----
+  // Alles in Nederlandse tijd (zie nlWallClockToDate). Eén dag is een tekst
+  // "JJJJ-MM-DD" volgens de Nederlandse kalender.
+
+  const pad2 = (n) => String(n).padStart(2, "0");
+
+  // Naar boven afronden op 5 minuten (14:37 wordt 14:40): voor tijden die het
+  // formulier zelf voorstelt (standaardmoment, aanpassen aan de landing, eerstvolgende
+  // vrije tijd). Nooit eerder dan de oorspronkelijke tijd, dus nooit te kort.
+  function ceilToFiveMinutes(date) {
+    const step = 5 * 60 * 1000;
+    return new Date(Math.ceil(date.getTime() / step) * step);
   }
 
-  // datetime-local geeft een string zonder tijdzone terug. Die lezen we sinds
-  // 23 november 2026 ALTIJD als Nederlandse tijd (niet als tijd van de browser),
-  // zodat een klant in het buitenland dezelfde rit boekt als een klant thuis.
-  // Het resultaat is een echt moment (Date); toISOString() geeft de ISO-string
-  // met tijdzone die de backend verwacht.
-  function localInputValueToDate(value) {
-    const m = /^(\d{4}-\d{2}-\d{2})T(\d{1,2}:\d{2})/.exec(String(value || ""));
-    return m ? nlWallClockToDate(m[1], m[2]) : new Date(NaN);
+  function ymdAddDays(ymd, days) {
+    const [y, m, d] = ymd.split("-").map(Number);
+    return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+  }
+
+  // Het moment van uur:minuut op die dag (Nederlandse klok).
+  function pickerSlot(ymd, hour, minute) {
+    return nlWallClockToDate(ymd, `${pad2(hour)}:${pad2(minute)}`);
+  }
+
+  function pickerFormat(date, options) {
+    return new Intl.DateTimeFormat(locale(), Object.assign({ timeZone: NL_TIME_ZONE }, options)).format(date);
   }
 
   // 15 oktober 2026: willekeurige code per paginabezoek, alleen om bij de
@@ -621,6 +633,8 @@
       // "binnen 24 uur"-waarschuwing tot gevolg bij het boeken.
       dateTime: null,
       dateTimeTouched: false,
+      // Open stand van de datum- en tijdkiezer (zie renderDateTimePicker), of null.
+      picker: null,
       // ⓘ bij "Gekozen moment" uitgeklapt? (stap 1)
       dateInfoOpen: false,
       arrivalInfoOpen: false,
@@ -960,7 +974,269 @@
     // verouderd, bij het laden van de widget bevroren moment.
     function getEffectiveDateTime() {
       if (state.dateTimeTouched && state.dateTime) return state.dateTime;
-      return new Date(Date.now() + (getDefaultLeadMinutes() + widgetSafetyBufferMinutes) * 60 * 1000);
+      return ceilToFiveMinutes(new Date(Date.now() + (getDefaultLeadMinutes() + widgetSafetyBufferMinutes) * 60 * 1000));
+    }
+
+    // ---- Datum- en tijdkiezer in drie stappen (24 november 2026, Hans) ----
+    // Vervangt <input type="datetime-local">: die ziet er per apparaat en browser
+    // anders uit en het scrollwiel voor de minuten is niet te vinden. Nu kiest de
+    // klant eerst de dag (kalender), dan het uur en dan de minuten per 5, zoals
+    // bij andere taxi-sites. Alles in Nederlandse tijd. Tijden die niet kunnen
+    // (te kort van tevoren, nachtblokkade, niet na de heenrit) staan grijs.
+    // De open stand staat in state.picker, zodat een nieuwe tekenbeurt van het
+    // formulier een open kiezer niet sluit.
+    const PICKER_MINUTES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+
+    function focusPicker(key) {
+      const panel = root.querySelector(`[data-wnt-dtp="${key}"] .wnt-dtp-panel`);
+      if (!panel) return;
+      const target =
+        panel.querySelector('.wnt-dtp-cell[aria-pressed="true"]:not([disabled])') ||
+        panel.querySelector(".wnt-dtp-cell.wnt-dtp-today:not([disabled])") ||
+        panel.querySelector(".wnt-dtp-cell:not([disabled])");
+      if (target) target.focus();
+    }
+
+    // value: gekozen moment (of null); minDate: eerste moment dat mag; extraDisabled(slot):
+    // true als dit moment niet kan; onPick(date): wordt aangeroepen met het gekozen moment.
+    function renderDateTimePicker({ key, value, minDate, extraDisabled, legend, ariaLabel, invalid, onPick }) {
+      let current = value;
+      let panel = null;
+      const wrapper = el("div", { class: "wnt-dtp", "data-wnt-dtp": key });
+      const textNode = el("span", { class: "wnt-dtp-text" });
+      const open = () => Boolean(state.picker && state.picker.key === key);
+
+      const slotDisabled = (ymd, hour, minute) => {
+        const slot = pickerSlot(ymd, hour, minute);
+        const parts = nlClockParts(slot);
+        if (parts.hour !== hour || parts.minute !== minute) return true; // bestaat niet (zomertijd-overgang)
+        if (minDate && slot.getTime() < minDate.getTime()) return true;
+        return Boolean(extraDisabled && extraDisabled(slot));
+      };
+      const hourDisabled = (ymd, hour) => PICKER_MINUTES.every((m) => slotDisabled(ymd, hour, m));
+      // Een hele dag valt alleen weg als hij helemaal voor de eerste toegestane tijd ligt.
+      const dayDisabled = (ymd) => Boolean(minDate) && pickerSlot(ymd, 23, 55).getTime() < minDate.getTime();
+      const sameDay = (date, ymd) => Boolean(date) && localDateString(date) === ymd;
+
+      const fieldClass = "wnt-dtp-field" + (invalid && invalid.class ? ` ${invalid.class}` : "");
+      const fieldNode = el(
+        "button",
+        {
+          type: "button",
+          class: fieldClass,
+          "aria-haspopup": "dialog",
+          "aria-label": ariaLabel,
+          "aria-invalid": invalid && invalid["aria-invalid"] ? "true" : undefined,
+          onclick: () => {
+            if (open()) {
+              state.picker = null;
+              draw();
+              return;
+            }
+            const base = current || minDate || new Date();
+            const ymd = localDateString(base);
+            state.picker = { key, stage: "date", year: Number(ymd.slice(0, 4)), month: Number(ymd.slice(5, 7)) - 1, ymd: current ? localDateString(current) : null, hour: null };
+            render(); // sluit ook een eventueel andere open kiezer
+            focusPicker(key);
+          },
+        },
+        [
+          el("span", {
+            class: "wnt-dtp-icon",
+            "aria-hidden": "true",
+            html: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
+          }),
+          textNode,
+        ]
+      );
+      wrapper.fieldNode = fieldNode;
+      wrapper.appendChild(fieldNode);
+
+      function cell(label, opts) {
+        return el("button", {
+          type: "button",
+          class: "wnt-dtp-cell" + (opts.today ? " wnt-dtp-today" : "") + (opts.selected ? " wnt-dtp-selected" : ""),
+          disabled: opts.disabled || undefined,
+          "aria-pressed": opts.selected ? "true" : "false",
+          "aria-label": opts.aria || label,
+          "data-ymd": opts.ymd,
+          "data-hour": opts.hour,
+          "data-minute": opts.minute,
+          onclick: opts.onclick,
+          text: label,
+        });
+      }
+
+      function navButton(symbol, label, disabled, onclick) {
+        return el("button", { type: "button", class: "wnt-dtp-nav", "aria-label": label, disabled: disabled || undefined, onclick, text: symbol });
+      }
+
+      function buildPanel(p) {
+        const today = localDateString(new Date());
+        const head = el("div", { class: "wnt-dtp-head" });
+        const grid = el("div", { class: "wnt-dtp-grid wnt-dtp-grid-" + p.stage });
+        let hint;
+        let anyDisabled = false;
+
+        if (p.stage === "date") {
+          hint = t("Kies de dag", "Choose the day");
+          const first = Date.UTC(p.year, p.month, 1);
+          const daysInMonth = new Date(Date.UTC(p.year, p.month + 1, 0)).getUTCDate();
+          const lead = (new Date(first).getUTCDay() + 6) % 7; // week begint op maandag
+          const prevLast = new Date(Date.UTC(p.year, p.month, 0)).toISOString().slice(0, 10);
+          const goMonth = (delta) => {
+            const d = new Date(Date.UTC(p.year, p.month + delta, 1));
+            p.year = d.getUTCFullYear();
+            p.month = d.getUTCMonth();
+            draw();
+            focusPicker(key);
+          };
+          head.appendChild(navButton("‹", t("Vorige maand", "Previous month"), dayDisabled(prevLast), () => goMonth(-1)));
+          head.appendChild(
+            el("span", { class: "wnt-dtp-title", text: new Intl.DateTimeFormat(locale(), { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(first)) })
+          );
+          head.appendChild(navButton("›", t("Volgende maand", "Next month"), false, () => goMonth(1)));
+          for (let i = 0; i < 7; i += 1) {
+            grid.appendChild(el("span", { class: "wnt-dtp-weekday", text: new Intl.DateTimeFormat(locale(), { weekday: "short", timeZone: "UTC" }).format(new Date(Date.UTC(2024, 0, 1 + i))) }));
+          }
+          for (let i = 0; i < lead; i += 1) grid.appendChild(el("span", { class: "wnt-dtp-blank" }));
+          for (let d = 1; d <= daysInMonth; d += 1) {
+            const ymd = `${p.year}-${pad2(p.month + 1)}-${pad2(d)}`;
+            const disabled = dayDisabled(ymd);
+            if (disabled) anyDisabled = true;
+            grid.appendChild(
+              cell(String(d), {
+                ymd,
+                disabled,
+                today: ymd === today,
+                selected: sameDay(current, ymd),
+                aria: pickerFormat(pickerSlot(ymd, 12, 0), { weekday: "long", day: "numeric", month: "long", year: "numeric" }),
+                onclick: () => {
+                  p.ymd = ymd;
+                  p.stage = "hour";
+                  draw();
+                  focusPicker(key);
+                },
+              })
+            );
+          }
+        } else if (p.stage === "hour") {
+          hint = t("Kies het uur", "Choose the hour");
+          const prevYmd = ymdAddDays(p.ymd, -1);
+          const goDay = (delta) => {
+            p.ymd = ymdAddDays(p.ymd, delta);
+            draw();
+            focusPicker(key);
+          };
+          head.appendChild(navButton("‹", t("Vorige dag", "Previous day"), dayDisabled(prevYmd), () => goDay(-1)));
+          head.appendChild(
+            el("button", {
+              type: "button",
+              class: "wnt-dtp-title wnt-dtp-title-button",
+              "aria-label": t("Andere dag kiezen", "Choose another day"),
+              onclick: () => {
+                p.stage = "date";
+                p.year = Number(p.ymd.slice(0, 4));
+                p.month = Number(p.ymd.slice(5, 7)) - 1;
+                draw();
+                focusPicker(key);
+              },
+              text: pickerFormat(pickerSlot(p.ymd, 12, 0), { weekday: "short", day: "numeric", month: "short", year: "numeric" }) + " ▾",
+            })
+          );
+          head.appendChild(navButton("›", t("Volgende dag", "Next day"), false, () => goDay(1)));
+          for (let h = 0; h < 24; h += 1) {
+            const disabled = hourDisabled(p.ymd, h);
+            if (disabled) anyDisabled = true;
+            grid.appendChild(
+              cell(`${pad2(h)}:00`, {
+                hour: String(h),
+                disabled,
+                selected: Boolean(current) && sameDay(current, p.ymd) && nlClockParts(current).hour === h,
+                onclick: () => {
+                  p.hour = h;
+                  p.stage = "minute";
+                  draw();
+                  focusPicker(key);
+                },
+              })
+            );
+          }
+        } else {
+          hint = t("Kies de minuten", "Choose the minutes");
+          head.appendChild(el("span", { class: "wnt-dtp-nav wnt-dtp-nav-blank", "aria-hidden": "true" }));
+          head.appendChild(
+            el("button", {
+              type: "button",
+              class: "wnt-dtp-title wnt-dtp-title-button",
+              "aria-label": t("Ander uur kiezen", "Choose another hour"),
+              onclick: () => {
+                p.stage = "hour";
+                draw();
+                focusPicker(key);
+              },
+              text: `${pickerFormat(pickerSlot(p.ymd, 12, 0), { weekday: "short", day: "numeric", month: "short", year: "numeric" })}, ${pad2(p.hour)}:00 ▾`,
+            })
+          );
+          head.appendChild(el("span", { class: "wnt-dtp-nav wnt-dtp-nav-blank", "aria-hidden": "true" }));
+          PICKER_MINUTES.forEach((m) => {
+            const disabled = slotDisabled(p.ymd, p.hour, m);
+            if (disabled) anyDisabled = true;
+            const slot = pickerSlot(p.ymd, p.hour, m);
+            grid.appendChild(
+              cell(`${pad2(p.hour)}:${pad2(m)}`, {
+                minute: String(m),
+                disabled,
+                selected: Boolean(current) && current.getTime() === slot.getTime(),
+                onclick: () => {
+                  state.picker = null;
+                  current = slot;
+                  draw();
+                  onPick(slot);
+                },
+              })
+            );
+          });
+        }
+
+        const node = el("div", { class: "wnt-dtp-panel", role: "dialog", "aria-label": ariaLabel, onkeydown: (e) => {
+          if (e.key === "Escape") {
+            state.picker = null;
+            draw();
+            fieldNode.focus();
+          }
+        } }, [head, el("p", { class: "wnt-dtp-hint", text: hint }), grid]);
+        if (anyDisabled && p.stage !== "date" && legend) node.appendChild(el("p", { class: "wnt-hint wnt-dtp-legend", text: legend }));
+        node.appendChild(
+          el("button", {
+            type: "button",
+            class: "wnt-dtp-close",
+            onclick: () => {
+              state.picker = null;
+              draw();
+              fieldNode.focus();
+            },
+            text: t("Sluiten", "Close"),
+          })
+        );
+        return node;
+      }
+
+      function draw() {
+        textNode.textContent = current ? formatDateTime(current) : t("Selecteer datum en tijd", "Select date and time");
+        textNode.classList.toggle("wnt-dtp-placeholder", !current);
+        fieldNode.setAttribute("aria-expanded", open() ? "true" : "false");
+        if (panel) {
+          panel.remove();
+          panel = null;
+        }
+        if (open()) {
+          panel = buildPanel(state.picker);
+          wrapper.appendChild(panel);
+        }
+      }
+      draw();
+      return wrapper;
     }
 
     // Woorden die voor de klant hetzelfde betekenen. Een zoekterm van minimaal
@@ -1295,6 +1571,7 @@
 
     // Neemt een nieuw ophaalmoment over via een knop en legt dat vast.
     function adoptPickupTime(newDate, reason) {
+      newDate = ceilToFiveMinutes(newDate);
       const from = getEffectiveDateTime();
       state.timeSteps.push({ reason, from: from.toISOString(), to: newDate.toISOString() });
       state.dateTime = newDate;
@@ -1313,6 +1590,7 @@
     }
 
     function adoptReturnPickupTime(newDate, reason) {
+      newDate = ceilToFiveMinutes(newDate);
       const from = state.returnDateTime;
       state.returnTimeSteps.push({ reason: reason || "capacity", from: from ? from.toISOString() : newDate.toISOString(), to: newDate.toISOString() });
       state.returnDateTime = newDate;
@@ -1944,7 +2222,7 @@
       const start = rule.nightBlockStartTime || "22:00";
       const end = rule.nightBlockEndTime || "07:00";
       if (start === end) return false;
-      const at = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Amsterdam", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date);
+      const at = NIGHT_CLOCK_FORMAT.format(date);
       return start < end ? at >= start && at < end : at >= start || at < end;
     }
 
@@ -2599,17 +2877,21 @@
       const dateWrapper = el("div", { class: "wnt-field" });
       dateWrapper.appendChild(el("label", { text: t("Ophaaldatum en -tijd", "Pickup date and time") }));
       dateWrapper.appendChild(
-        el("input", {
-          type: "datetime-local",
-          value: toDateTimeLocalValue(getEffectiveDateTime()),
-          min: getMinimumLeadMinutes() ? toDateTimeLocalValue(new Date(Date.now() + getMinimumLeadMinutes() * 60 * 1000)) : undefined,
-          ...invalidAttrs("dateTime"),
-          onchange: (e) => {
-            if (e.target.value) {
-              state.dateTime = localInputValueToDate(e.target.value);
-              state.timeSteps = [];
-              state.dateTimeTouched = true;
-            }
+        renderDateTimePicker({
+          key: "outbound",
+          value: getEffectiveDateTime(),
+          minDate: new Date(Date.now() + getMinimumLeadMinutes() * 60 * 1000),
+          extraDisabled: (slot) => nightBlocked(slot),
+          legend: t(
+            "Grijze tijden kunt u niet online boeken (te kort van tevoren of in de nacht). Wilt u toch dan rijden? Neem dan telefonisch contact met ons op.",
+            "Greyed-out times cannot be booked online (too short notice or at night). Want to travel then anyway? Please call us."
+          ),
+          ariaLabel: t("Ophaaldatum en -tijd", "Pickup date and time"),
+          invalid: invalidAttrs("dateTime"),
+          onPick: (picked) => {
+            state.dateTime = picked;
+            state.timeSteps = [];
+            state.dateTimeTouched = true;
             // Te kort van tevoren? Meteen melden; anders een eerdere melding weghalen.
             delete state.fieldErrors.dateTime;
             if (outboundProblem()) state.fieldErrors.dateTime = { message: outboundProblem(), check: () => !!outboundProblem() };
@@ -2755,34 +3037,29 @@
 
         const returnDateField = el("div", { class: "wnt-field" });
         returnDateField.appendChild(el("label", { text: t("Datum en tijd terugrit", "Date and time of return trip") }));
-        returnDateField.appendChild(
-          el("input", {
-            type: "datetime-local",
-            id: "wnt-return-datetime",
-            value: state.returnDateTime ? toDateTimeLocalValue(state.returnDateTime) : "",
-            min: toDateTimeLocalValue(getEffectiveDateTime()),
-            ...invalidAttrs("returnDateTime"),
-            onchange: (e) => {
-              state.returnDateTime = e.target.value ? localInputValueToDate(e.target.value) : null;
-              state.returnTimeSteps = [];
-              syncReturnOrderError(e.target);
-              if (state.returnDateTime) {
-                returnDateHint.textContent = t(`Gekozen: ${formatDateTime(state.returnDateTime)}`, `Chosen: ${formatDateTime(state.returnDateTime)}`);
-              } else {
-                returnDateHint.textContent = t(
-                  "Kies een vaste datum en tijd. Weet u dat nog niet? Boek de terugrit dan later als losse rit.",
-                  "Choose a fixed date and time. Don't know yet? Then book the return trip later as a separate trip."
-                );
-              }
-              // Andere terugritdag/-tijd: de vluchtopzoeking en de landingscontrole
-              // gelden per datum en ophaaltijd.
-              scheduleFlightRefresh(() => {
-                render();
-                if (isReturnAirportPickup() && state.returnFlightNumber.trim()) lookupFlightInfo("return");
-              });
-            },
-          })
-        );
+        const returnPicker = renderDateTimePicker({
+          key: "return",
+          value: state.returnDateTime,
+          // De terugrit moet na de heenrit liggen (zelfde regel als returnBeforeOutbound).
+          minDate: new Date(getEffectiveDateTime().getTime() + 1),
+          extraDisabled: (slot) => nightBlocked(slot),
+          legend: t("Grijze tijden liggen niet na de heenrit (of zijn 's nachts niet online te boeken).", "Greyed-out times are not after the outbound trip (or cannot be booked online at night)."),
+          ariaLabel: t("Datum en tijd terugrit", "Date and time of return trip"),
+          invalid: invalidAttrs("returnDateTime"),
+          onPick: (picked) => {
+            state.returnDateTime = picked;
+            state.returnTimeSteps = [];
+            syncReturnOrderError(returnPicker.fieldNode);
+            returnDateHint.textContent = t(`Gekozen: ${formatDateTime(state.returnDateTime)}`, `Chosen: ${formatDateTime(state.returnDateTime)}`);
+            // Andere terugritdag/-tijd: de vluchtopzoeking en de landingscontrole
+            // gelden per datum en ophaaltijd.
+            scheduleFlightRefresh(() => {
+              render();
+              if (isReturnAirportPickup() && state.returnFlightNumber.trim()) lookupFlightInfo("return");
+            });
+          },
+        });
+        returnDateField.appendChild(returnPicker);
         const returnDateHint = el("p", {
           class: "wnt-hint",
           text: state.returnDateTime

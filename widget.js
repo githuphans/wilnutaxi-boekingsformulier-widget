@@ -987,6 +987,56 @@
     // formulier een open kiezer niet sluit.
     const PICKER_MINUTES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
 
+    // Kalender helemaal in beeld (26 november 2026, Hans: op een telefoon opende hij deels onder
+    // de rand van het scherm, waardoor een klant de maandpijlen en latere dagen niet zag).
+    // Past het paneel niet onder het datumveld, dan schuift de pagina omhoog tot het hele paneel
+    // zichtbaar is; past het helemaal niet, dan in elk geval de bovenkant met de maand en pijlen.
+    //
+    // 26 november 2026 (tweede ronde): op een laptop met een vaste menubalk van de website (Edge)
+    // viel de bovenkant van het paneel onder die balk. Daarom wordt eerst de hoogte van zo'n
+    // vaste of plakkende balk bovenaan het scherm bepaald, en blijft het paneel daaronder.
+    function topObstruction() {
+      let inset = 0;
+      try {
+        const vw = window.innerWidth;
+        const vhAll = window.innerHeight;
+        for (const x of [vw * 0.25, vw * 0.5, vw * 0.75]) {
+          for (const y of [3, 12, 24]) {
+            for (const el of document.elementsFromPoint(x, y)) {
+              if (el === document.documentElement || el === document.body || root.contains(el)) continue;
+              const pos = window.getComputedStyle(el).position;
+              if (pos !== "fixed" && pos !== "sticky") continue;
+              const b = el.getBoundingClientRect();
+              // Alleen een brede balk die bovenin vastzit en niet een groot deel van het scherm beslaat.
+              if (b.top <= 24 && b.bottom > 0 && b.bottom < vhAll * 0.4 && b.width >= vw * 0.5) {
+                inset = Math.max(inset, b.bottom);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        inset = 0;
+      }
+      return inset;
+    }
+
+    function revealPicker(panel) {
+      const r = panel.getBoundingClientRect();
+      const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+      const margin = 12;
+      const topLimit = topObstruction() + margin;
+      let dy = 0;
+      if (r.bottom > vh - margin) dy = r.bottom - (vh - margin);
+      if (r.top - dy < topLimit) dy = r.top - topLimit;
+      if (Math.abs(dy) > 1) {
+        try {
+          window.scrollBy({ top: dy, behavior: "smooth" });
+        } catch (e) {
+          window.scrollBy(0, dy);
+        }
+      }
+    }
+
     function focusPicker(key) {
       const panel = root.querySelector(`[data-wnt-dtp="${key}"] .wnt-dtp-panel`);
       if (!panel) return;
@@ -994,7 +1044,14 @@
         panel.querySelector('.wnt-dtp-cell[aria-pressed="true"]:not([disabled])') ||
         panel.querySelector(".wnt-dtp-cell.wnt-dtp-today:not([disabled])") ||
         panel.querySelector(".wnt-dtp-cell:not([disabled])");
-      if (target) target.focus();
+      if (target) {
+        try {
+          target.focus({ preventScroll: true });
+        } catch (e) {
+          target.focus();
+        }
+      }
+      revealPicker(panel);
     }
 
     // value: gekozen moment (of null); minDate: eerste moment dat mag; extraDisabled(slot):

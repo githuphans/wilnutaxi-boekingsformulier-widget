@@ -987,6 +987,26 @@
     // formulier een open kiezer niet sluit.
     const PICKER_MINUTES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
 
+    // Kalender helemaal in beeld (26 november 2026, Hans: op een telefoon opende hij deels onder
+    // de rand van het scherm, waardoor een klant de maandpijlen en latere dagen niet zag).
+    // Past het paneel niet onder het datumveld, dan schuift de pagina omhoog tot het hele paneel
+    // zichtbaar is; past het helemaal niet, dan in elk geval de bovenkant met de maand en pijlen.
+    function revealPicker(panel) {
+      const r = panel.getBoundingClientRect();
+      const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+      const margin = 12;
+      let dy = 0;
+      if (r.bottom > vh - margin) dy = r.bottom - (vh - margin);
+      if (r.top - dy < margin) dy = r.top - margin;
+      if (Math.abs(dy) > 1) {
+        try {
+          window.scrollBy({ top: dy, behavior: "smooth" });
+        } catch (e) {
+          window.scrollBy(0, dy);
+        }
+      }
+    }
+
     function focusPicker(key) {
       const panel = root.querySelector(`[data-wnt-dtp="${key}"] .wnt-dtp-panel`);
       if (!panel) return;
@@ -994,7 +1014,14 @@
         panel.querySelector('.wnt-dtp-cell[aria-pressed="true"]:not([disabled])') ||
         panel.querySelector(".wnt-dtp-cell.wnt-dtp-today:not([disabled])") ||
         panel.querySelector(".wnt-dtp-cell:not([disabled])");
-      if (target) target.focus();
+      if (target) {
+        try {
+          target.focus({ preventScroll: true });
+        } catch (e) {
+          target.focus();
+        }
+      }
+      revealPicker(panel);
     }
 
     // value: gekozen moment (of null); minDate: eerste moment dat mag; extraDisabled(slot):
